@@ -29,9 +29,7 @@
 #include <netinet/tcp.h>
 #include <string.h>
 #include <errno.h>
-#ifdef HAVE_PPOLL
-#  include <poll.h>
-#endif
+#include <poll.h>
 
 namespace ebusd {
 
