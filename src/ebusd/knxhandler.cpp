@@ -43,7 +43,7 @@ using std::dec;
 // 5 bits magic (to be incremented with incompatible changes, not shown)
 // 5 bits major, using major directly
 // 6 bits minor, using minor multiplied by 10 to have space for micro versioning in future
-#define VERSION_INT ((PACKAGE_VERSION_MAJOR << 6) |(PACKAGE_VERSION_MINOR*10))
+#define VERSION_INT ((26 << 6) | (1 * 10))
 
 #define O_URL -2
 #define O_AGR (O_URL-1)
