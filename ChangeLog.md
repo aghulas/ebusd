@@ -1,3 +1,8 @@
+# next
+## Bug Fixes
+* fix message key of IDs longer than 7 bytes
+
+
 # 26.1 (2026-02-08)
 ## Bug Fixes
 * fix potential memory leak

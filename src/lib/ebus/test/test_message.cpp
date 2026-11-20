@@ -52,6 +52,50 @@ void verify(bool expectFailMatch, string type, string input,
 
 DataFieldTemplates* templates = nullptr;
 
+/** Test messages with IDs longer than 7 bytes (the ID length in the message key is limited to 7). */
+void testLongId(MessageMap* messages) {
+  cout << "long ID:" << endl;
+  messages->clear();
+  istringstream stream(
+    "type,circuit,level,name,comment,qq,zz,pbsb,id,*name,part,type,divisor/values,unit,comment\n"
+    "r,c,,Short,,,15,5022,01,,,UCH,,,\n"
+    "r,c,,Seven,,,15,5022,01020304050607,,,UCH,,,\n"
+    "r,c,,Nine,,,15,5022,010203040506070809,,,UCH,,,\n"
+    "r,c,,NineB,,,15,5022,01020304050607080a,,,UCH,,,\n"
+    "r,c,,Seventeen,,,15,5022,0102030405060708090a0b0c0d0e0f1011,,,UCH,,,\n"
+    "r,c,,NineZero,,,15,5022,010000000000000000,,,UCH,,,\n");  // same folded key bytes as "Short"
+  map<string, string> defaults;
+  string err;
+  result_t result = messages->readFromStream(&stream, "test.csv", 0, false, &defaults, &err);
+  if (result != RESULT_OK) {
+    cout << "  load FAILED: " << getResultCode(result) << " " << err << endl;
+    error = true;
+    return;
+  }
+  const char* checks[][2] = {
+    {"31155022""09""010203040506070809", "Nine"},
+    {"31155022""09""01020304050607080a", "NineB"},
+    {"31155022""09""01020304050607080b", "Seven"},
+    {"31155022""07""01020304050607", "Seven"},
+    {"31155022""11""0102030405060708090a0b0c0d0e0f1011", "Seventeen"},
+    {"31155022""09""01ffffffffffffff09", "Short"},
+    {"31155022""09""010000000000000000", "NineZero"},
+  };
+  for (const auto& check : checks) {
+    MasterSymbolString master;
+    master.parseHex(check[0]);
+    Message* message = messages->find(master);
+    string name = message ? message->getName() : "none";
+    if (name == check[1]) {
+      cout << "  find " << check[0] << " -> " << name << " OK" << endl;
+    } else {
+      cout << "  find " << check[0] << " -> " << name << " FAILED, expected " << check[1] << endl;
+      error = true;
+    }
+  }
+}
+
+
 namespace ebusd {
 
 class TestResolver : public Resolver {
@@ -510,6 +554,8 @@ int main() {
       verify(failedPrepareMatch, "prepare", inputStr, match, mstrs[0]->getStr(), writeMstr.getStr());
     }
   }
+
+  testLongId(messages);
 
   delete templates;
   delete messages;

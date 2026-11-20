@@ -626,7 +626,7 @@ class Message : public AttributedItem {
    * <ul>
    * <li>byte 7:
    *  <ul>
-   *   <li>bits 5-7: length of ID bytes (without PB/SB)</li>
+   *   <li>bits 5-7: length of ID bytes (without PB/SB), 7 for 7 or more</li>
    *   <li>bits 0-4:
    *    <ul>
    *     <li>master number (1..25) of sender for passive message</li>
