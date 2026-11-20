@@ -233,6 +233,30 @@ void testComputedByte(MessageMap* messages) {
     check(result == RESULT_OK && master == expect,
         string("prepare ") + send.name + " " + send.input + ": " + master.getStr() + " expected " + expect.getStr());
   }
+  // chained message with the computed byte in the common prefix of its IDs
+  {
+    string err2;
+    check(loadCsv(messages, header +
+        "r,ka,,Chained,,,15,5022,000d01:2;000d02:2,crc8;poly=5c,a,,UIN,,,,b,,UIN,,,\n", &err2) == RESULT_OK,
+        "load chained " + err2);
+    Message* message = messages->find("ka", "Chained", "", false);
+    check(message && message->getCount() == 2, "chained parts");
+    const char* parts[] = {"3115502203""290d01", "3115502203""2a0d02"};
+    for (size_t index = 0; message && index < 2; index++) {
+      istringstream input("");
+      MasterSymbolString master;
+      result = message->prepareMaster(index, 0x31, SYN, UI_FIELD_SEPARATOR, &input, &master);
+      check(result == RESULT_OK && master.getStr() == parts[index], string("chained prepare ") + master.getStr());
+      size_t foundIndex = 99;
+      check(messages->find(master) == message && message->checkId(master, &foundIndex) && foundIndex == index,
+          string("chained find ") + master.getStr());
+      master[5] ^= 1;
+      check(messages->find(master) != message, string("chained wrong CRC ") + master.getStr());
+    }
+    check(loadCsv(messages, header +
+        "r,ka,,Chained,,,15,5022,000d01:2;000d02:2,crc8;poly=5c;pos=2;from=0;to=2,a,,UIN,,,,b,,UIN,,,\n", &err2)
+        != RESULT_OK, "reject computed byte in the varying part of chained IDs: " + err2);
+  }
   // precedence: a message with a computed byte in a longer ID wins over a shorter ID matching the same telegram
   {
     string err2;
