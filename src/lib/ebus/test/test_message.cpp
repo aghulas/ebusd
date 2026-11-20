@@ -168,6 +168,26 @@ void testComputedByte(MessageMap* messages) {
   check(loadCsv(&checkingMap, header + "r,ka,,A,,,15,5022,4c2500,crc8;poly=5c,,,UIN,,,\n"
       "r,ka,,B,,,15,5022,002500,,,,UIN,,,\n", &err) == RESULT_OK,
       "accept same ID with and without computed byte");
+  // duplicates, the same in both orders and whatever placeholder is written in the ID: a message with a computed
+  // byte is never a duplicate of one without (the latter is found for its exact ID), two with a computed byte are
+  // compared without it
+  const char* duplicates[][3] = {
+    // first, second, "1" if duplicate
+    {"r,ka,,A,,,15,5022,002500,,,,UIN,,,", "r,ka,,B,,,15,5022,002500,crc8;poly=5c,,,UIN,,,", "0"},
+    {"r,ka,,A,,,15,5022,4c2500,,,,UIN,,,", "r,ka,,B,,,15,5022,002500,crc8;poly=5c,,,UIN,,,", "0"},
+    {"r,ka,,A,,,15,5022,4c2500,,,,UIN,,,", "r,ka,,B,,,15,5022,4c2500,crc8;poly=5c,,,UIN,,,", "0"},
+    {"r,ka,,A,,,15,5022,002500,crc8;poly=5c,,,UIN,,,", "r,ka,,B,,,15,5022,4c2500,crc8;poly=5c,,,UIN,,,", "1"},
+    {"r,ka,,A,,,15,5022,002500,crc8;poly=5c,,,UIN,,,", "r,ka,,B,,,15,5022,002600,crc8;poly=5c,,,UIN,,,", "0"},
+  };
+  for (const auto& dup : duplicates) {
+    for (int order = 0; order < 2; order++) {
+      string first = dup[order], second = dup[1-order];
+      result_t res = loadCsv(&checkingMap, header + first + "\n" + second + "\n", &err);
+      bool isDuplicate = res == RESULT_ERR_DUPLICATE;
+      check(isDuplicate == (dup[2][0] == '1') && (isDuplicate || res == RESULT_OK),
+          string(isDuplicate ? "duplicate " : "no duplicate ") + first + " / " + second);
+    }
+  }
 
   // definitions: send and receive
   string csv =

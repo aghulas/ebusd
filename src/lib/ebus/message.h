@@ -464,12 +464,13 @@ class Message : public AttributedItem {
 
  protected:
   /**
-   * Return the ID of this message prepared for comparing it with the ID of the other @a Message, i.e. with a computed
-   * byte at the same position within the ID of both messages replaced by the one of the other message.
+   * Check the ID (or the chain prefix) against the one of the other @a Message, taking a computed byte within the ID
+   * into account: a message with a computed byte never has the same ID as one without (the latter matches only its
+   * exact ID), and two messages with a computed byte are compared without it.
    * @param other the other @a Message.
-   * @return the ID for comparing.
+   * @return true if the IDs are the same.
    */
-  vector<symbol_t> idComparableTo(const Message& other) const;
+  bool checkIdWithComputed(const Message& other) const;
 
  public:
 
