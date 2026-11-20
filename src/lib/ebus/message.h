@@ -462,11 +462,28 @@ class Message : public AttributedItem {
    */
   virtual bool checkId(const Message& other) const;
 
+ protected:
+  /**
+   * Return the ID of this message prepared for comparing it with the ID of the other @a Message, i.e. with a computed
+   * byte at the same position within the ID of both messages replaced by the one of the other message.
+   * @param other the other @a Message.
+   * @return the ID for comparing.
+   */
+  vector<symbol_t> idComparableTo(const Message& other) const;
+
+ public:
+
   /**
    * Return the key for storing in @a MessageMap.
    * @return the key for storing in @a MessageMap.
    */
   uint64_t getKey() const { return m_key; }
+
+  /**
+   * Return the computed byte of the master data.
+   * @return the @a ComputedByte (possibly disabled).
+   */
+  const ComputedByte& getComputedByte() const { return m_computed; }
 
   /**
    * Return the derived key for storing in @a MessageMap.
@@ -732,6 +749,9 @@ class Message : public AttributedItem {
 
   /** the primary, secondary, and optionally further command ID bytes. */
   const vector<symbol_t> m_id;
+
+  /** the computed byte of the master data. */
+  const ComputedByte m_computed;
 
   /**
    * the key for storing in @a MessageMap.
@@ -1695,6 +1715,23 @@ class MessageMap : public MappedFileReader {
   Message* find(const MasterSymbolString& master, bool anyDestination = false, bool withRead = true,
       bool withWrite = true, bool withPassive = true, bool onlyAvailable = true) const;
 
+ private:
+  /**
+   * Find the @a Message instance for the key of the specified master data.
+   * @param keyMaster the @a MasterSymbolString for building the key.
+   * @param master the @a MasterSymbolString for checking the ID of the @a Message.
+   * @param anyDestination true to only return messages without a particular destination.
+   * @param withRead true to include read messages.
+   * @param withWrite true to include write messages.
+   * @param withPassive true to include passive messages.
+   * @param onlyAvailable true to include only available messages.
+   * @return the @a Message instance, or nullptr.
+   */
+  Message* findByKeyOf(const MasterSymbolString& keyMaster, const MasterSymbolString& master, bool anyDestination,
+      bool withRead, bool withWrite, bool withPassive, bool onlyAvailable) const;
+
+ public:
+
   /**
    * Invalidate cached data of the @a Message and all other instances with a matching name key.
    * @param message the @a Message to invalidate.
@@ -1820,6 +1857,9 @@ class MessageMap : public MappedFileReader {
 
   /** the maximum ID length used by any of the known @a Message instances with destination @a BROADCAST. */
   size_t m_maxBroadcastIdLength;
+
+  /** the distinct positions of computed bytes within the ID of any of the known @a Message instances. */
+  vector<size_t> m_computedIdPositions;
 
   /** the number of distinct @a Message instances stored in @a m_messagesByName. */
   size_t m_messageCount;

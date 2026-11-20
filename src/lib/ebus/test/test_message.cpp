@@ -81,6 +81,20 @@ class TestResolver : public Resolver {
 }  // namespace ebusd
 
 
+/**
+ * Load message definitions from a CSV string with header line into the @a MessageMap.
+ * @param messages the @a MessageMap to load into (cleared before).
+ * @param csv the CSV with header line.
+ * @param errorDescription the error description.
+ * @return the result code.
+ */
+result_t loadCsv(MessageMap* messages, const string& csv, string* errorDescription) {
+  messages->clear();
+  istringstream stream(csv);
+  map<string, string> defaults;
+  return messages->readFromStream(&stream, "test.csv", 0, false, &defaults, errorDescription);
+}
+
 void check(bool ok, const string& what) {
   if (ok) {
     cout << "  " << what << " OK" << endl;
@@ -91,7 +105,7 @@ void check(bool ok, const string& what) {
 }
 
 /** Test the computed byte of the master data (attribute "crc"). */
-void testComputedByte() {
+void testComputedByte(MessageMap* messages) {
   cout << "computed byte:" << endl;
   // parser
   const char* goodDefs[] = {"crc8", "crc8;poly=5c", "CRC8; poly=5c; init=00; pos=0; from=1; to=*; check=strict",
@@ -140,6 +154,97 @@ void testComputedByte() {
   MasterSymbolString shortData;
   shortData.parseHex("0000000003""3108b5");
   check(frame.compute(shortData, &frameValue) == RESULT_ERR_INVALID_POS, "compute beyond data rejected");
+
+  // definitions: errors
+  const string header =
+      "type,circuit,level,name,comment,qq,zz,pbsb,id,crc,*name,part,type,divisor/values,unit,comment\n";
+  check(loadCsv(messages, header + "r,ka,,Bad,,,15,5022,4c2500,crc8;poly=zz,,,UIN,,,\n", &err) != RESULT_OK,
+      "reject bad crc attribute");
+  MessageMap checkingMap(false, "", false);  // not adding all, i.e. with duplicate check
+  checkingMap.setResolver(new TestResolver());
+  check(loadCsv(&checkingMap, header + "r,ka,,A,,,15,5022,4c2500,crc8;poly=5c,,,UIN,,,\n"
+      "r,ka,,B,,,15,5022,002500,crc8;poly=5c,,,UIN,,,\n", &err) == RESULT_ERR_DUPLICATE,
+      "reject duplicate differing only in the computed byte " + err);
+  check(loadCsv(&checkingMap, header + "r,ka,,A,,,15,5022,4c2500,crc8;poly=5c,,,UIN,,,\n"
+      "r,ka,,B,,,15,5022,002500,,,,UIN,,,\n", &err) == RESULT_OK,
+      "accept same ID with and without computed byte");
+
+  // definitions: send and receive
+  string csv =
+    "type,circuit,level,name,comment,qq,zz,pbsb,id,crc,*name,part,type,divisor/values,unit,comment\n"
+    "r,ka,,BlockingTime,,,15,5022,4c2500,crc8;poly=5c,,,UIN,,,\n"
+    "w,ka,,BlockingTime,,,15,5023,4c2500,crc8;poly=5c,,,UIN,,,\n"
+    "r,ka,,Other,,,15,5022,ab2600,crc8;poly=5c,,,UIN,,,\n"
+    "r,ka,,Plain,,,15,5022,002700,,,,UIN,,,\n"
+    "w,bm,,HG07,,,08,5023,c14201,crc8;poly=5c,,,UIN,,min,,suffix,,HEX:4,=5d010000,,\n"
+    "r,bm,,Lax,,,08,5022,cc2d00,crc8;poly=5c;check=ignore,,,UIN,,,\n"
+    "w,bm,,Trailer,,,08,b509,0d,crc8;pos=3;from=0;to=3,,,UIN,,,,crc,,HEX:1,,,\n";
+  result_t result = loadCsv(messages, csv, &err);
+  check(result == RESULT_OK, "load definitions " + err);
+  if (result != RESULT_OK) {
+    return;
+  }
+  struct {
+    const char* circuit;
+    const char* name;
+    bool isWrite;
+    const char* input;
+    const char* expect;
+  } sends[] = {
+    {"ka", "BlockingTime", false, "", "3115502203""4c2500"},
+    // writes of BlockingTime (register 0x0025) as taken on the bus by a Weishaupt system manager
+    {"ka", "BlockingTime", true, "2", "3115502305""cc25000200"},
+    {"ka", "BlockingTime", true, "1", "3115502305""2825000100"},
+    {"bm", "HG07", true, "4;5d010000", "3108502309""d842010400" "5d010000"},
+    {"ka", "Plain", false, "", "3115502203""002700"},
+    {"bm", "Trailer", true, "2", "3108b50904""0d0200" "53"},
+  };
+  for (const auto& send : sends) {
+    Message* message = messages->find(send.circuit, send.name, "", send.isWrite);
+    if (!message) {
+      check(false, string("find ") + send.name);
+      continue;
+    }
+    istringstream input(send.input);
+    MasterSymbolString master;
+    result = message->prepareMaster(0, 0x31, SYN, UI_FIELD_SEPARATOR, &input, &master);
+    MasterSymbolString expect;
+    expect.parseHex(send.expect);
+    check(result == RESULT_OK && master == expect,
+        string("prepare ") + send.name + " " + send.input + ": " + master.getStr() + " expected " + expect.getStr());
+  }
+  struct {
+    const char* master;
+    const char* expectName;  // nullptr for no match
+  } receives[] = {
+    {"3115502203""4c2500", "BlockingTime"},
+    {"3115502203""4d2500", nullptr},  // wrong CRC
+    {"3115502203""ab2600", "Other"},  // the placeholder in the definition is not the CRC, but the CRC on the bus is
+    {"3115502203""002700", "Plain"},
+    {"ff15502305""cc25000200", "BlockingTime"},
+    {"ff15502305""2825000100", "BlockingTime"},
+    {"ff15502305""4c25000200", nullptr},  // a write with the CRC of the address only
+    {"3108502203""cc2d00", "Lax"},  // check=ignore: a constant accepted
+    {"3108502203""142d00", "Lax"},  // check=ignore: the correct one too
+  };
+  // the correct CRC of register 0x0026
+  symbol_t crc26 = 0;
+  {
+    MasterSymbolString m;
+    m.parseHex("3115502203""002600");
+    wh.compute(m, &crc26);
+  }
+  for (const auto& recv : receives) {
+    MasterSymbolString master;
+    master.parseHex(recv.master);
+    if (string(recv.master) == "3115502203""ab2600") {
+      master[5] = crc26;
+    }
+    Message* message = messages->find(master);
+    bool ok = recv.expectName == nullptr ? message == nullptr
+        : message != nullptr && message->getName() == recv.expectName;
+    check(ok, string("find ") + master.getStr() + " -> " + (message ? message->getName() : "none"));
+  }
 }
 
 int main() {
@@ -573,7 +678,7 @@ int main() {
     }
   }
 
-  testComputedByte();
+  testComputedByte(messages);
 
   delete templates;
   delete messages;

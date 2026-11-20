@@ -23,6 +23,7 @@
 #include <locale>
 #include <iomanip>
 #include <climits>
+#include <algorithm>
 #include "lib/ebus/data.h"
 #include "lib/ebus/result.h"
 #include "lib/ebus/symbol.h"
@@ -229,6 +230,21 @@ result_t ComputedByte::apply(MasterSymbolString* master) const {
   return RESULT_OK;
 }
 
+/**
+ * Return the ID to use for the message key, with a computed byte within the ID cleared.
+ * @param id the message ID (PB, SB, further ID bytes).
+ * @param computed the @a ComputedByte of the message.
+ * @return the ID for the key.
+ */
+static vector<symbol_t> keyId(const vector<symbol_t>& id, const ComputedByte& computed) {
+  if (!computed.isInId(id.size()-2)) {
+    return id;
+  }
+  vector<symbol_t> ret = id;
+  ret[2+computed.getPos()] = 0;
+  return ret;
+}
+
 
 Message::Message(const string& filename, const string& circuit, const string& level, const string& name,
     bool isWrite, bool isPassive, const map<string, string>& attributes,
@@ -241,7 +257,8 @@ Message::Message(const string& filename, const string& circuit, const string& le
       m_filename(filename), m_circuit(circuit), m_level(level), m_isWrite(isWrite),
       m_isPassive(isPassive),
       m_srcAddress(srcAddress), m_dstAddress(dstAddress),
-      m_id(id), m_key(createKey(id, isWrite, isPassive, srcAddress, dstAddress)),
+      m_id(id), m_computed(ComputedByte::fromAttributes(attributes)),
+      m_key(createKey(keyId(id, m_computed), isWrite, isPassive, srcAddress, dstAddress)),
       m_data(data), m_deleteData(deleteData),
       m_pollPriority(pollPriority),
       m_usedByCondition(false), m_isScanMessage(false), m_condition(condition), m_availableSinceTime(0),
@@ -261,7 +278,7 @@ Message::Message(const string& circuit, const string& level, const string& name,
       m_circuit(circuit), m_level(level), m_isWrite(broadcast),
       m_isPassive(false),
       m_srcAddress(SYN), m_dstAddress(broadcast ? BROADCAST : SYN),
-      m_id({pb, sb}), m_key(createKey(pb, sb, broadcast)),
+      m_id({pb, sb}), m_computed(), m_key(createKey(pb, sb, broadcast)),
       m_data(data), m_deleteData(deleteData),
       m_pollPriority(0),
       m_usedByCondition(false), m_isScanMessage(true), m_condition(nullptr), m_availableSinceTime(0),
@@ -587,6 +604,20 @@ result_t Message::create(const string& filename, const DataFieldTemplates* templ
   } else if (!lastChainLengthSpecified) {
     maxLength = MAX_POS;
   }
+  str = getDefault(pluck(COMPUTED_BYTE_ATTRIBUTE, row), defaults, COMPUTED_BYTE_ATTRIBUTE);
+  if (!str.empty()) {
+    ComputedByte computed;
+    result = computed.parse(str, errorDescription);
+    if (result != RESULT_OK) {
+      return result;
+    }
+    if (computed.getMinLength() > maxLength || (chainIds.size() > 1 && computed.getPos() >= chainPrefixLength-2
+        && computed.getPos() < chainIds.front().size()-2)) {
+      *errorDescription = "crc position "+str;
+      return RESULT_ERR_INVALID_POS;
+    }
+    (*row)[COMPUTED_BYTE_ATTRIBUTE] = str;
+  }
   vector<string> newTypes;
   auto subIt = subRowDefaults.find(defaultName);
   if (subIt != subRowDefaults.end()) {
@@ -722,10 +753,14 @@ bool Message::checkId(const MasterSymbolString& master, size_t* index) const {
   if (master.getDataSize() < idLen) {
     return false;
   }
+  bool skipComputed = m_computed.isInId(idLen);
   for (size_t pos = 0; pos < idLen; pos++) {
-    if (m_id[2+pos] != master.dataAt(pos)) {
+    if (m_id[2+pos] != master.dataAt(pos) && !(skipComputed && pos == m_computed.getPos())) {
       return false;
     }
+  }
+  if (!m_computed.check(master)) {
+    return false;
   }
   if (index) {
     *index = 0;
@@ -738,7 +773,18 @@ bool Message::checkId(const Message& other) const {
   if (idLen != other.getIdLength() || getCount() > 1) {  // only equal for non-chained messages
     return false;
   }
-  return other.checkIdPrefix(m_id);
+  return other.checkIdPrefix(idComparableTo(other));
+}
+
+vector<symbol_t> Message::idComparableTo(const Message& other) const {
+  size_t idLen = Message::getIdLength();
+  if (!m_computed.isInId(idLen) || !other.m_computed.isInId(other.Message::getIdLength())
+      || m_computed.getPos() != other.m_computed.getPos()) {
+    return m_id;
+  }
+  vector<symbol_t> ret = m_id;
+  ret[2+m_computed.getPos()] = other.m_id[2+m_computed.getPos()];
+  return ret;
 }
 
 uint64_t Message::getDerivedKey(symbol_t dstAddress) const {
@@ -830,6 +876,10 @@ result_t Message::prepareMaster(size_t index, symbol_t srcAddress, symbol_t dstA
   master->push_back(m_id[0]);
   master->push_back(m_id[1]);
   result_t result = prepareMasterPart(index, separator, input, master);
+  if (result != RESULT_OK) {
+    return result;
+  }
+  result = m_computed.apply(master);
   if (result != RESULT_OK) {
     return result;
   }
@@ -1241,10 +1291,14 @@ bool ChainedMessage::checkId(const MasterSymbolString& master, size_t* index) co
     return false;
   }
   size_t chainPrefixLength = Message::getIdLength();
+  bool skipComputed = m_computed.isInId(chainPrefixLength);
   for (size_t pos = 0; pos < chainPrefixLength; pos++) {
-    if (m_id[2+pos] != master.dataAt(pos)) {
+    if (m_id[2+pos] != master.dataAt(pos) && !(skipComputed && pos == m_computed.getPos())) {
       return false;  // chain prefix mismatch
     }
+  }
+  if (!m_computed.check(master)) {
+    return false;
   }
   for (size_t checkIndex = 0; checkIndex < m_ids.size(); checkIndex++) {  // check suffix for each part
     vector<symbol_t> id = m_ids[checkIndex];
@@ -1271,7 +1325,7 @@ bool ChainedMessage::checkId(const Message& other) const {
   if (idLen != other.getIdLength() || other.getCount() == 1) {  // only equal for chained messages
     return false;
   }
-  if (!other.checkIdPrefix(m_id)) {
+  if (!other.checkIdPrefix(idComparableTo(other))) {
     return false;  // chain prefix mismatch
   }
   vector< vector<symbol_t> > otherIds = ((ChainedMessage&)other).m_ids;
@@ -2103,6 +2157,12 @@ result_t MessageMap::add(bool storeByName, Message* message, bool replace) {
   if (idLength > m_maxIdLength) {
     m_maxIdLength = idLength;
   }
+  const ComputedByte& computed = message->getComputedByte();
+  if (computed.isInId(message->Message::getIdLength())
+      && std::find(m_computedIdPositions.begin(), m_computedIdPositions.end(), computed.getPos())
+         == m_computedIdPositions.end()) {
+    m_computedIdPositions.push_back(computed.getPos());
+  }
   m_messagesByKey[key].push_back(message);
   return RESULT_OK;
 }
@@ -2859,8 +2919,29 @@ Message* MessageMap::find(const MasterSymbolString& master, bool anyDestination,
   if (anyDestination && master.size() >= 5 && master[4] == 0 && master[2] == 0x07 && master[3] == 0x04) {
     return m_scanMessage;
   }
+  Message* message = findByKeyOf(master, master, anyDestination, withRead, withWrite, withPassive, onlyAvailable);
+  if (message) {
+    return message;
+  }
+  // try again with the key of messages having a computed byte in the ID, i.e. with that byte cleared
+  for (const auto pos : m_computedIdPositions) {
+    if (master.getDataSize() <= pos || master.dataAt(pos) == 0) {
+      continue;
+    }
+    MasterSymbolString keyMaster(master);
+    keyMaster[5+pos] = 0;
+    message = findByKeyOf(keyMaster, master, anyDestination, withRead, withWrite, withPassive, onlyAvailable);
+    if (message) {
+      return message;
+    }
+  }
+  return nullptr;
+}
+
+Message* MessageMap::findByKeyOf(const MasterSymbolString& keyMaster, const MasterSymbolString& master,
+    bool anyDestination, bool withRead, bool withWrite, bool withPassive, bool onlyAvailable) const {
   size_t maxIdLength = anyDestination || master[1] != BROADCAST ? m_maxIdLength : m_maxBroadcastIdLength;
-  uint64_t baseKey = Message::createKey(master, maxIdLength, anyDestination);
+  uint64_t baseKey = Message::createKey(keyMaster, maxIdLength, anyDestination);
   if (baseKey == INVALID_KEY) {
     return nullptr;
   }
@@ -2873,7 +2954,7 @@ Message* MessageMap::find(const MasterSymbolString& master, bool anyDestination,
       key |= (uint64_t)idLength << (8 * 7 + 5);
       int exp = 3;
       for (size_t i = 0; i < idLength; i++) {
-        key ^= (uint64_t)master.dataAt(i) << (8 * exp--);
+        key ^= (uint64_t)keyMaster.dataAt(i) << (8 * exp--);
         if (exp < 0) {
           exp = 3;
         }
@@ -3026,6 +3107,7 @@ void MessageMap::clear() {
   }
   m_circuitData.clear();
   m_maxIdLength = m_maxBroadcastIdLength = 0;
+  m_computedIdPositions.clear();
   m_additionalScanMessages = false;
 }
 
