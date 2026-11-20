@@ -57,6 +57,9 @@ bool PollRequest::notify(result_t result, const SlaveSymbolString& slave) {
   if (result < RESULT_OK) {
     logError(lf_bus, "poll %s %s failed: %s", m_message->getCircuit().c_str(), m_message->getName().c_str(),
         getResultCode(result));
+    if (m_message->isCarrier()) {
+      m_message->setFillFailed(true);  // poll the filled messages directly from now on
+    }
   }
   return false;
 }
@@ -358,7 +361,9 @@ void BusHandler::notifyProtocolStatus(ProtocolState state, result_t result) {
         m_lastPoll = now;
         if (difftime(now, message->getLastUpdateTime()) > m_pollInterval) {
           // only poll this message if it was not updated already by other means within the interval
-          auto request = new PollRequest(message);
+          // read a carrier filling this message instead if available
+          Message* carrier = m_messages->findFillCarrier(message);
+          auto request = new PollRequest(carrier ? carrier : message);
           result_t ret = request->prepare(m_protocol->getOwnMasterAddress());
           if (ret != RESULT_OK) {
             logError(lf_bus, "prepare poll message: %s", getResultCode(ret));

@@ -1667,6 +1667,13 @@ class MessageMap : public MappedFileReader {
    */
   result_t distribute(Message* carrier, vector<Message*>* updated, string* errorDescription);
 
+  /**
+   * Find a carrier message able to fill the specified target message instead of reading it (e.g. for polling).
+   * @param target the target @a Message.
+   * @return the carrier @a Message, or nullptr.
+   */
+  Message* findFillCarrier(Message* target);
+
  private:
   /**
    * Resolve the target messages of a carrier message.

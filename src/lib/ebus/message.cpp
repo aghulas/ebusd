@@ -3010,6 +3010,27 @@ result_t MessageMap::distribute(Message* carrier, vector<Message*>* updated, str
   return overallResult;
 }
 
+Message* MessageMap::findFillCarrier(Message* target) {
+  for (const auto carrier : m_fillCarriers) {
+    if (carrier->m_fillFailed || carrier->getCircuit() != target->getCircuit()) {
+      continue;
+    }
+    if (carrier->m_fillGeneration != m_fillGeneration) {
+      string error;
+      resolveFills(carrier, &error);
+    }
+    if (carrier->isPassive() || (carrier->getDstAddress() == SYN && target->getDstAddress() == SYN)) {
+      continue;  // not able to send
+    }
+    for (const auto& link : carrier->m_fillLinks) {
+      if (link.target == target) {
+        return carrier;
+      }
+    }
+  }
+  return nullptr;
+}
+
 void MessageMap::addPollMessage(bool toFront, Message* message) {
   if (message != nullptr && message->getPollPriority() > 0) {
     lock();
