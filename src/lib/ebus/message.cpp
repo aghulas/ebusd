@@ -3148,6 +3148,10 @@ void MessageMap::invalidateCache(Message* message) {
   if (message->isWrite()) {
     // a write also invalidates the carriers filling the read message of the same name
     for (const auto carrier : m_fillCarriers) {
+      if (carrier->m_fillGeneration != m_fillGeneration) {
+        string error;
+        resolveFills(carrier, &error);  // links may point to removed messages
+      }
       for (const auto& link : carrier->m_fillLinks) {
         if (link.target && link.target->getCircuit() == circuit && link.target->getName() == name) {
           carrier->m_lastUpdateTime = 0;

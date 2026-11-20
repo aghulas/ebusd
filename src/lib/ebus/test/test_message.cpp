@@ -251,6 +251,27 @@ void testFills(MessageMap* messages) {
         "telegram to another destination fills only the target without destination");
   }
 
+  // removing a target leaves no dangling link: invalidating after a write and distributing use the current messages
+  err.clear();
+  result = loadFillsCsv(messages, header + carrier + targets +
+      "w,fs1,,HolidayStartDay,,,35,5023,0d1b01,,,UIN,,,,\n", &err);
+  checkFills(result == RESULT_OK, "load carrier with write " + err);
+  message = messages->find("fs1", "HolidayStart", "", false);
+  Message* write = messages->find("fs1", "HolidayStartDay", "", true);
+  Message* removed = messages->find("fs1", "HolidayStartDay", "", false);
+  if (message && write && removed) {
+    err.clear();
+    messages->resolveFills(&err);
+    messages->remove(removed);  // deletes it
+    message->storeLastData(master, slave);
+    messages->invalidateCache(write);
+    updated.clear();
+    err.clear();
+    result = messages->distribute(message, &updated, &err);
+    checkFills(updated.size() == 2 && updated[0]->getName() == "HolidayStartMonth"
+        && updated[1]->getName() == "HolidayStartThird", "removed target not filled");
+  }
+
   // a memory carrier with a verified first byte only decodes with that byte 0
   err.clear();
   result = loadFillsCsv(messages, header +
