@@ -206,6 +206,7 @@ void testFills(MessageMap* messages) {
         string("filled ") + exp[0] + " = " + output.str() + " from " + target->getLastMasterData().getStr());
     // a target is the one found for its own telegram, the carrier for the grouped one
     checkFills(messages->find(target->getLastMasterData()) == target, string("find ") + exp[0]);
+    checkFills(messages->findFillCarrier(target) == message, string("carrier of ") + exp[0]);
   }
   // a short answer fills nothing
   SlaveSymbolString shortSlave;
@@ -218,6 +219,10 @@ void testFills(MessageMap* messages) {
   ostringstream output;
   day->decodeLastData(pt_any, false, nullptr, -1, OF_NONE, &output);
   checkFills(output.str() == "30", "short answer keeps value " + output.str());
+  // a failed carrier is not used for polling
+  message->setFillFailed(true);
+  checkFills(messages->findFillCarrier(day) == nullptr, "failed carrier not used");
+  message->setFillFailed(false);
   // a non-carrier is not distributed
   updated.clear();
   checkFills(messages->distribute(day, &updated, &err) == RESULT_EMPTY, "not a carrier");

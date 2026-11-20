@@ -7,6 +7,7 @@
 * accept "[WCRC]" at the start of the comment and attribute "wcrc" as aliases of "crc8;poly=5c" (Weishaupt fork)
 * add carrier messages filling other messages from fields of their answer (field attribute "fills")
 * carrier messages are not published to data sinks (MQTT, KNX), only the messages they fill
+* poll a carrier message instead of a message it fills
 
 
 # 26.1 (2026-02-08)
