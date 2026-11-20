@@ -52,6 +52,75 @@ void verify(bool expectFailMatch, string type, string input,
 
 DataFieldTemplates* templates = nullptr;
 
+/**
+ * Load message definitions from a CSV string with header line.
+ * @param messages the @a MessageMap to load into (cleared before).
+ * @param csv the CSV with header line.
+ * @param errorDescription the error description.
+ * @return the result code.
+ */
+result_t loadFillsCsv(MessageMap* messages, const string& csv, string* errorDescription) {
+  messages->clear();
+  istringstream stream(csv);
+  map<string, string> defaults;
+  return messages->readFromStream(&stream, "test.csv", 0, false, &defaults, errorDescription);
+}
+
+void checkFills(bool ok, const string& what) {
+  cout << "  " << what << (ok ? " OK" : " FAILED") << endl;
+  if (!ok) {
+    error = true;
+  }
+}
+
+/** Test the carrier messages filling other messages (field attribute "fills"). */
+void testFills(MessageMap* messages) {
+  cout << "fills:" << endl;
+  const string header =
+      "type,circuit,level,name,comment,qq,zz,pbsb,id,*name,part,type,divisor/values,unit,comment,fills\n";
+  const string targets =
+      "r,fs1,,HolidayStartDay,,,35,5022,0d1b01,,,UIN,,,,\n"
+      "r,fs1,,HolidayStartMonth,,,35,5022,c51c01,,,UIN,,,,\n"
+      "r,fs1,,HolidayStartThird,,,35,5022,991d01,,,UIN,,,,\n";
+  string err;
+  // load errors
+  const char* badCarriers[] = {
+    "r,fs1,,C,,,35,5022,d91b011c011d01,a,,UIN,,,,HolidayStartDay,b,,STR:*,,,,HolidayStartMonth\n",  // variable
+    "r,fs1,,C,,,35,5022,d91b011c011d01,a,,STR:*,,,,,b,,UIN,,,,HolidayStartMonth\n",  // after variable
+    "r,fs1,,C,,,35,5022,d91b011c011d01,a,,BI0,,,,HolidayStartDay,b,,BI1,,,,\n",  // partial byte
+    "r,fs1,,C,,,35,5022,d91b011c011d01,a,m,UCH,,,,HolidayStartDay\n",  // master data
+    "w,fs1,,C,,,35,5023,d91b011c011d01,a,s,UIN,,,,HolidayStartDay\n",  // write
+    "r,fs1,,C,,,35,5022,d91b011c011d01,a,,UCH,,,,HolidayStartDay,b,,UCH,,,,,c,,UCH,,,,HolidayStartDay\n",  // gap
+  };
+  for (const auto carrier : badCarriers) {
+    err.clear();
+    checkFills(loadFillsCsv(messages, header + targets + carrier, &err) != RESULT_OK, string("reject ") + carrier
+        + " (" + err + ")");
+  }
+  // resolution errors
+  const char* badTargets[][2] = {
+    {"r,fs1,,C,,,35,5022,d91b011c011d01,a,,UIN,,,,Missing\n", "not found"},
+    {"w,fs1,,T,,,35,5023,001b01,,,UIN,,,,\nr,fs1,,C,,,35,5022,d91b011c011d01,a,,UIN,,,,T\n", "not found"},
+    {"r,fs1,,T,,,35,5022,001b01,x,m,UCH,,,,,v,s,UIN,,,,\nr,fs1,,C,,,35,5022,d91b011c011d01,a,,UIN,,,,T\n",
+        "has master data"},
+    {"r,fs1,,T,,,35,5022,001b01,,,UCH,,,,\nr,fs1,,C,,,35,5022,d91b011c011d01,a,,UIN,,,,T\n", "has another length"},
+    {"r,fs1,,T,,,75,5022,001b01,,,UIN,,,,\nr,fs1,,C,,,35,5022,d91b011c011d01,a,,UIN,,,,T\n",
+        "has another destination"},
+    {"r,fs1,,T,,,35,5022,001b01,a,,UIN,,,,HolidayStartDay\nr,fs1,,C,,,35,5022,d91b011c011d01,a,,UIN,,,,T\n",
+        "is a carrier"},
+  };
+  for (const auto& bad : badTargets) {
+    err.clear();
+    result_t result = loadFillsCsv(messages, header + targets + bad[0], &err);
+    string resolveError;
+    if (result == RESULT_OK) {
+      result = messages->resolveFills(&resolveError);
+    }
+    checkFills(result != RESULT_OK && resolveError.find(bad[1]) != string::npos, "resolve error " + resolveError);
+  }
+}
+
+
 namespace ebusd {
 
 class TestResolver : public Resolver {
@@ -510,6 +579,8 @@ int main() {
       verify(failedPrepareMatch, "prepare", inputStr, match, mstrs[0]->getStr(), writeMstr.getStr());
     }
   }
+
+  testFills(messages);
 
   delete templates;
   delete messages;
