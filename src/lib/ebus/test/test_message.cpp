@@ -613,6 +613,53 @@ void testComputedByte(MessageMap* messages) {
   }
 }
 
+/** Test carrier messages with a computed byte, as for Weishaupt register reads (needs "crc" and "fills"). */
+void testComputedFills(MessageMap* messages) {
+  cout << "computed fills:" << endl;
+  string err;
+  // the carrier's placeholder is 00: the telegram on the bus carries the computed byte d9
+  result_t result = loadFillsCsv(messages,
+      "type,circuit,level,name,comment,qq,zz,pbsb,id,crc,*name,part,type,divisor/values,unit,fills,comment\n"
+      "r,fs1,,HolidayStart,,,35,5022,001b011c011d01,crc8;poly=5c,day,,UIN,,,HolidayStartDay,,"
+      "month,,UIN,,,HolidayStartMonth,,third,,UIN,,,HolidayStartThird,\n"
+      "r,fs1,,HolidayStartDay,,,35,5022,001b01,crc8;poly=5c,value,,UIN,,,,\n"
+      "r,fs1,,HolidayStartMonth,,,35,5022,001c01,crc8;poly=5c,value,,UIN,,,,\n"
+      "r,fs1,,HolidayStartThird,,,35,5022,001d01,crc8;poly=5c,value,,UIN,,,,\n"
+      "r,fs1,,Generic,,,35,5022,,,value,,UIN,,,,\n", &err);
+  checkFills(result == RESULT_OK, "load " + err);
+  Message* carrier = messages->find("fs1", "HolidayStart", "", false);
+  if (result != RESULT_OK || !carrier) {
+    return;
+  }
+  MasterSymbolString master, wrong;
+  SlaveSymbolString slave;
+  master.parseHex("3135502207d91b011c011d01");
+  wrong.parseHex("3135502207d81b011c011d01");
+  slave.parseHex("061e000a000000");
+  checkFills(messages->find(master) == carrier, "carrier found for the computed byte (not the generic message)");
+  checkFills(messages->find(wrong) != carrier, "carrier not found for a wrong byte");
+  istringstream input("");
+  MasterSymbolString sent;
+  checkFills(carrier->prepareMaster(0, 0x31, SYN, UI_FIELD_SEPARATOR, &input, &sent) == RESULT_OK
+      && sent == master, "carrier sent with the computed byte " + sent.getStr());
+  carrier->storeLastData(master, slave);
+  vector<Message*> updated;
+  checkFills(messages->distribute(carrier, &updated, &err) == RESULT_OK && updated.size() == 3, "distribute " + err);
+  const char* expected[][3] = {
+    {"HolidayStartDay", "30", "31355022030d1b01"},
+    {"HolidayStartMonth", "10", "3135502203c51c01"},
+    {"HolidayStartThird", "0", "3135502203991d01"},
+  };
+  for (const auto& exp : expected) {
+    Message* target = messages->find("fs1", exp[0], "", false);
+    ostringstream output;
+    checkFills(target && target->decodeLastData(pt_slaveData, false, nullptr, -1, OF_NONE, &output) == RESULT_OK
+        && output.str() == exp[1] && target->getLastMasterData().getStr() == exp[2],
+        string("filled ") + exp[0] + " = " + output.str() + " with " + (target ? target->getLastMasterData().getStr()
+        : ""));
+  }
+}
+
 int main() {
   // message:   [type],[circuit],name,[comment],[QQ[;QQ]*],[ZZ],[PBSB],[ID],fields...
   // field:     name,part,type[:len][,[divisor|values][,[unit][,[comment]]]]
@@ -1049,6 +1096,8 @@ int main() {
   testLongId(messages);
 
   testFills(messages);
+
+  testComputedFills(messages);
 
   delete templates;
   delete messages;
