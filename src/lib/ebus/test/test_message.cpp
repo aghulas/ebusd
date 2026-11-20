@@ -263,6 +263,21 @@ void testFills(MessageMap* messages) {
     checkFills(result == RESULT_OK && target && messages->findFillCarrier(target) == nullptr,
         string("not polled through ") + def + err);
   }
+  // a failed carrier stays failed when other messages are added (it is retried once answered)
+  err.clear();
+  result = loadFillsCsv(messages, header + carrier + targets, &err);
+  message = messages->find("fs1", "HolidayStart", "", false);
+  day = messages->find("fs1", "HolidayStartDay", "", false);
+  if (message && day) {
+    checkFills(messages->findFillCarrier(day) == message, "polled through carrier");
+    message->setFillFailed(true);
+    istringstream more("r,fs1,,Other,,,35,5022,001e01,,,UIN,,,,\n");
+    map<string, string> defaults;
+    messages->readFromStream(&more, "more.csv", 0, false, &defaults, &err);
+    messages->resolveFills(&err);  // as after a scan
+    checkFills(messages->findFillCarrier(day) == nullptr, "failed carrier stays failed after an addition");
+  }
+
   // removing a target leaves no dangling link: invalidating after a write and distributing use the current messages
   err.clear();
   result = loadFillsCsv(messages, header + carrier + targets +
