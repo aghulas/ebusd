@@ -3131,6 +3131,17 @@ Message* MessageMap::findByKey(uint64_t key, const MasterSymbolString& master, b
   return nullptr;
 }
 
+/**
+ * Holds the lock of a @a MessageMap while in scope (the lock is recursive).
+ */
+class MessageMapLock {
+ public:
+  explicit MessageMapLock(MessageMap* map) : m_map(map) { m_map->lock(); }
+  ~MessageMapLock() { m_map->unlock(); }
+ private:
+  MessageMap* m_map;
+};
+
 void MessageMap::invalidateCache(Message* message) {
   if (message->m_data == DataFieldSet::getIdentFields()) {
     return;
@@ -3147,6 +3158,7 @@ void MessageMap::invalidateCache(Message* message) {
   }
   if (message->isWrite()) {
     // a write also invalidates the carriers filling the read message of the same name
+    MessageMapLock lock(this);
     for (const auto carrier : m_fillCarriers) {
       if (carrier->m_fillGeneration != m_fillGeneration) {
         string error;
@@ -3163,6 +3175,7 @@ void MessageMap::invalidateCache(Message* message) {
 }
 
 result_t MessageMap::resolveFills(Message* carrier, string* errorDescription) {
+  MessageMapLock lock(this);
   carrier->m_fillGeneration = m_fillGeneration;
   carrier->m_fillFailed = false;
   result_t overallResult = RESULT_OK;
@@ -3206,6 +3219,7 @@ result_t MessageMap::resolveFills(Message* carrier, string* errorDescription) {
 }
 
 result_t MessageMap::resolveFills(string* errorDescription) {
+  MessageMapLock lock(this);
   result_t overallResult = RESULT_OK;
   for (const auto carrier : m_fillCarriers) {
     result_t result = resolveFills(carrier, errorDescription);
@@ -3220,6 +3234,7 @@ result_t MessageMap::distribute(Message* carrier, vector<Message*>* updated, str
   if (!carrier->isCarrier()) {
     return RESULT_EMPTY;
   }
+  MessageMapLock lock(this);
   result_t overallResult = RESULT_OK;
   if (carrier->m_fillGeneration != m_fillGeneration) {
     overallResult = resolveFills(carrier, errorDescription);
@@ -3270,6 +3285,7 @@ result_t MessageMap::distribute(Message* carrier, vector<Message*>* updated, str
 }
 
 Message* MessageMap::findFillCarrier(Message* target) {
+  MessageMapLock lock(this);
   for (const auto carrier : m_fillCarriers) {
     if (carrier->m_fillFailed || carrier->getCircuit() != target->getCircuit()) {
       continue;
