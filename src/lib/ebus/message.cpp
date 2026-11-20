@@ -2981,8 +2981,8 @@ result_t MessageMap::distribute(Message* carrier, vector<Message*>* updated, str
   }
   for (const auto& link : carrier->m_fillLinks) {
     Message* target = link.target;
-    if (!target) {
-      continue;
+    if (!target || (target->getDstAddress() != SYN && target->getDstAddress() != master[1])) {
+      continue;  // unresolved, or for another destination (carrier without destination)
     }
     SlaveSymbolString part;
     part.push_back(0);  // length, set below

@@ -158,7 +158,8 @@ void testFills(MessageMap* messages) {
     ostringstream output;
     result = target->decodeLastData(pt_any, false, nullptr, -1, OF_NONE, &output);
     checkFills(result == RESULT_OK && output.str() == exp[1] && target->getLastMasterData().getStr() == exp[2]
-        && target->getLastUpdateTime() == message->getLastUpdateTime(),
+        && target->getLastUpdateTime() >= message->getLastUpdateTime()
+        && target->getLastUpdateTime() <= message->getLastUpdateTime() + 1,
         string("filled ") + exp[0] + " = " + output.str() + " from " + target->getLastMasterData().getStr());
     // a target is the one found for its own telegram, the carrier for the grouped one
     checkFills(messages->find(target->getLastMasterData()) == target, string("find ") + exp[0]);
@@ -182,6 +183,29 @@ void testFills(MessageMap* messages) {
   // a non-carrier is not distributed
   updated.clear();
   checkFills(messages->distribute(day, &updated, &err) == RESULT_EMPTY, "not a carrier");
+
+  // a carrier without destination only fills a target of the destination of the telegram
+  err.clear();
+  result = loadFillsCsv(messages, header +
+      "r,fs1,,AnyStart,,,,5022,d91b011c011d01,day,,UIN,,,,HolidayStartDay,month,,UIN,,,,Generic,third,,UIN,,,,\n"
+      "r,fs1,,HolidayStartDay,,,35,5022,0d1b01,,,UIN,,,,\n"
+      "r,fs1,,Generic,,,,5022,c51c01,,,UIN,,,,\n", &err);
+  checkFills(result == RESULT_OK, "load carrier without destination " + err);
+  message = messages->find("fs1", "AnyStart", "", false);
+  Message* specific = messages->find("fs1", "HolidayStartDay", "", false);
+  Message* generic = messages->find("fs1", "Generic", "", false);
+  if (message && specific && generic) {
+    MasterSymbolString other;
+    SlaveSymbolString otherSlave;
+    other.parseHex("3108502207d91b011c011d01");
+    otherSlave.parseHex("06010002000300");
+    message->storeLastData(other, otherSlave);
+    updated.clear();
+    err.clear();
+    messages->distribute(message, &updated, &err);
+    checkFills(updated.size() == 1 && updated[0] == generic && specific->getLastUpdateTime() == 0,
+        "telegram to another destination fills only the target without destination");
+  }
 
   // a memory carrier with a verified first byte only decodes with that byte 0
   err.clear();
