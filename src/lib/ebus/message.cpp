@@ -3039,8 +3039,9 @@ Message* MessageMap::findFillCarrier(Message* target) {
       string error;
       resolveFills(carrier, &error);
     }
-    if (carrier->isPassive() || (carrier->getDstAddress() == SYN && target->getDstAddress() == SYN)) {
-      continue;  // not able to send
+    if (carrier->isPassive() || carrier->getDstAddress() == SYN || !carrier->isAvailable()
+        || carrier->m_data->getLength(pt_masterData, MAX_POS) != 0) {
+      continue;  // not able to send it on its own
     }
     for (const auto& link : carrier->m_fillLinks) {
       if (link.target == target) {
