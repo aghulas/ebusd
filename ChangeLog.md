@@ -1,4 +1,7 @@
 # next
+## Bug Fixes
+* fix message key of IDs longer than 7 bytes
+
 ## Features
 * add computed byte of the master data, e.g. a checksum over the ID and data (message attribute "crc")
 * accept "[WCRC]" at the start of the comment and attribute "wcrc" as aliases of "crc8;poly=5c" (Weishaupt fork)

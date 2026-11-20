@@ -43,6 +43,9 @@ using std::endl;
 /** the bit mask of the source master number in the message key. */
 #define ID_SOURCE_MASK (0x1fLL << (8 * 7))
 
+/** the maximum ID length stored in the message key (longer IDs share this value). */
+#define MAX_KEY_ID_LENGTH 7
+
 /** the bit mask for the ID length and combined ID bytes in the message key. */
 #define ID_LENGTH_AND_IDS_MASK ((7LL << (8 * 7 + 5)) | 0xffffffffLL)
 
@@ -91,6 +94,15 @@ static const char* defaultMessageFieldMap[] = {  // access level not included in
     "type", "circuit", "name", "comment", "qq", "zz", "pbsb", "id",
     "*name", "part", "type", "divisor/values", "unit", "comment",
 };
+
+/**
+ * Return the ID length to store in the message key.
+ * @param idLength the length of the ID bytes (without PB/SB).
+ * @return the ID length limited to the bits available in the key.
+ */
+static size_t keyIdLength(size_t idLength) {
+  return idLength > MAX_KEY_ID_LENGTH ? MAX_KEY_ID_LENGTH : idLength;
+}
 
 /** the m_pollOrder of the last polled message. */
 static unsigned int g_lastPollOrder = 0;
@@ -330,7 +342,7 @@ string getDefault(const string& value, const map<string, string>& defaults, cons
 
 uint64_t Message::createKey(const vector<symbol_t>& id, bool isWrite, bool isPassive, symbol_t srcAddress,
     symbol_t dstAddress) {
-  uint64_t key = (uint64_t)(id.size()-2) << (8 * 7 + 5);
+  uint64_t key = (uint64_t)keyIdLength(id.size()-2) << (8 * 7 + 5);
   if (isPassive) {
     key |= (uint64_t)getMasterNumber(srcAddress) << (8 * 7);  // 0..25
   } else {
@@ -359,7 +371,7 @@ uint64_t Message::createKey(const MasterSymbolString& master, size_t maxIdLength
   if (master.getDataSize() < idLength) {
     return INVALID_KEY;
   }
-  uint64_t key = (uint64_t)idLength << (8 * 7 + 5);
+  uint64_t key = (uint64_t)keyIdLength(idLength) << (8 * 7 + 5);
   key |= (uint64_t)getMasterNumber(master[0]) << (8 * 7);  // QQ address for passive message
   key |= (uint64_t)(anyDestination ? (symbol_t)SYN : master[1]) << (8 * 6);  // ZZ address
   key |= (uint64_t)master[2] << (8 * 5);  // PB
@@ -2957,7 +2969,7 @@ Message* MessageMap::findByKeyOf(const MasterSymbolString& keyMaster, const Mast
     if (idLength == maxIdLength) {
       baseKey &= ~ID_LENGTH_AND_IDS_MASK;
     } else {
-      key |= (uint64_t)idLength << (8 * 7 + 5);
+      key |= (uint64_t)keyIdLength(idLength) << (8 * 7 + 5);
       int exp = 3;
       for (size_t i = 0; i < idLength; i++) {
         key ^= (uint64_t)keyMaster.dataAt(i) << (8 * exp--);
