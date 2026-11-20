@@ -1,7 +1,7 @@
 # next
 ## Features
 * add carrier messages filling other messages from fields of their answer (field attribute "fills")
-* carrier messages are not published to data sinks (MQTT, KNX), only the messages they fill
+* carrier messages are not published to data sinks (MQTT, KNX), only the messages they fill (fields of a carrier without "fills" are therefore not published)
 * poll a carrier message instead of a message it fills
 
 
