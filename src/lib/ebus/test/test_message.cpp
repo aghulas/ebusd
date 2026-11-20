@@ -213,6 +213,29 @@ void testComputedByte(MessageMap* messages) {
     check(result == RESULT_OK && master == expect,
         string("prepare ") + send.name + " " + send.input + ": " + master.getStr() + " expected " + expect.getStr());
   }
+  // precedence: a message with a computed byte in a longer ID wins over a shorter ID matching the same telegram
+  {
+    string err2;
+    check(loadCsv(messages, header +
+        "r,ka,,Generic,,,15,5022,,,,,UCH,,,\n"
+        "r,ka,,Short,,,15,5022,4c,,,,UCH,,,\n"
+        "r,ka,,Reg,,,15,5022,4c2500,crc8;poly=5c,,,UIN,,,\n"
+        "r,ka,,Reg26,,,15,5022,002600,crc8;poly=5c,,,UIN,,,\n", &err2) == RESULT_OK, "load precedence " + err2);
+    const char* precedence[][2] = {
+      {"3115502203""4c2500", "Reg"},
+      {"3115502203""4d2500", "Generic"},  // wrong CRC: not Reg
+      {"3115502203""a82600", "Reg26"},  // correct CRC, placeholder 00 in the definition
+      {"3115502201""4c", "Short"},
+    };
+    for (const auto& prec : precedence) {
+      MasterSymbolString master;
+      master.parseHex(prec[0]);
+      Message* message = messages->find(master);
+      check(message && message->getName() == prec[1], string("precedence ") + prec[0] + " -> "
+          + (message ? message->getName() : "none"));
+    }
+  }
+  result = loadCsv(messages, csv, &err);
   struct {
     const char* master;
     const char* expectName;  // nullptr for no match
