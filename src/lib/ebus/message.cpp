@@ -773,18 +773,24 @@ bool Message::checkId(const Message& other) const {
   if (idLen != other.getIdLength() || getCount() > 1) {  // only equal for non-chained messages
     return false;
   }
-  return other.checkIdPrefix(idComparableTo(other));
+  return checkIdWithComputed(other);
 }
 
-vector<symbol_t> Message::idComparableTo(const Message& other) const {
+bool Message::checkIdWithComputed(const Message& other) const {
   size_t idLen = Message::getIdLength();
-  if (!m_computed.isInId(idLen) || !other.m_computed.isInId(other.Message::getIdLength())
-      || m_computed.getPos() != other.m_computed.getPos()) {
-    return m_id;
+  bool mine = m_computed.isInId(idLen), others = other.m_computed.isInId(other.Message::getIdLength());
+  if (!mine && !others) {
+    return other.checkIdPrefix(m_id);
   }
-  vector<symbol_t> ret = m_id;
-  ret[2+m_computed.getPos()] = other.m_id[2+m_computed.getPos()];
-  return ret;
+  if (mine != others || m_id.size() != other.m_id.size()) {
+    return false;  // the one without computed byte is found for its exact ID
+  }
+  for (size_t pos = 0; pos < m_id.size(); pos++) {
+    if (m_id[pos] != other.m_id[pos] && pos != 2+m_computed.getPos() && pos != 2+other.m_computed.getPos()) {
+      return false;
+    }
+  }
+  return true;
 }
 
 uint64_t Message::getDerivedKey(symbol_t dstAddress) const {
@@ -1325,7 +1331,7 @@ bool ChainedMessage::checkId(const Message& other) const {
   if (idLen != other.getIdLength() || other.getCount() == 1) {  // only equal for chained messages
     return false;
   }
-  if (!other.checkIdPrefix(idComparableTo(other))) {
+  if (!checkIdWithComputed(other)) {
     return false;  // chain prefix mismatch
   }
   vector< vector<symbol_t> > otherIds = ((ChainedMessage&)other).m_ids;
