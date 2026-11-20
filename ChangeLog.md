@@ -6,7 +6,7 @@
 * add computed byte of the master data, e.g. a checksum over the ID and data (message attribute "crc")
 * accept "[WCRC]" at the start of the comment and attribute "wcrc" as aliases of "crc8;poly=5c" (Weishaupt fork)
 * add carrier messages filling other messages from fields of their answer (field attribute "fills")
-* carrier messages are not published to data sinks (MQTT, KNX), only the messages they fill
+* carrier messages are not published to data sinks (MQTT, KNX), only the messages they fill (fields of a carrier without "fills" are therefore not published)
 * poll a carrier message instead of a message it fills
 
 
