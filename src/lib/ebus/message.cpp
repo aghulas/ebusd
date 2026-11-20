@@ -283,7 +283,12 @@ Message::Message(const string& filename, const string& circuit, const string& le
       m_data(data), m_deleteData(deleteData),
       m_pollPriority(pollPriority),
       m_usedByCondition(false), m_isScanMessage(false), m_condition(condition), m_availableSinceTime(0),
-      m_dataHandlerState(0), m_lastUpdateTime(0), m_lastChangeTime(0), m_pollOrder(0), m_lastPollTime(0) {
+      m_dataHandlerState(0), m_lastUpdateTime(0), m_lastChangeTime(0), m_pollOrder(0), m_lastPollTime(0),
+      m_fillGeneration(0) {
+  string error;
+  if (createFillLinks(data, &m_fillLinks, &error) != RESULT_OK) {
+    m_fillLinks.clear();  // already reported by create()
+  }
   if (strcasecmp(circuit.c_str(), "scan") == 0) {
     setScanMessage();
     m_pollPriority = 0;
@@ -303,7 +308,8 @@ Message::Message(const string& circuit, const string& level, const string& name,
       m_data(data), m_deleteData(deleteData),
       m_pollPriority(0),
       m_usedByCondition(false), m_isScanMessage(true), m_condition(nullptr), m_availableSinceTime(0),
-      m_lastUpdateTime(0), m_lastChangeTime(0), m_pollOrder(0), m_lastPollTime(0) {
+      m_lastUpdateTime(0), m_lastChangeTime(0), m_pollOrder(0), m_lastPollTime(0),
+      m_fillGeneration(0) {
   time(&m_createTime);
 }
 
@@ -669,6 +675,16 @@ result_t Message::create(const string& filename, const DataFieldTemplates* templ
     *errorDescription = "data length";
     return RESULT_ERR_INVALID_POS;
   }
+  vector<FillLink> fillLinks;
+  result = createFillLinks(data, &fillLinks, errorDescription);
+  if (result == RESULT_OK && !fillLinks.empty() && (isWrite || chainIds.size() > 1)) {
+    *errorDescription = "fills in write or chained message";
+    result = RESULT_ERR_INVALID_ARG;
+  }
+  if (result != RESULT_OK) {
+    delete data;
+    return result;
+  }
   unsigned int index = 0;
   bool multiple = dstAddresses.size() > 1;
   char num[10];
@@ -688,6 +704,72 @@ result_t Message::create(const string& filename, const DataFieldTemplates* templ
     }
     messages->push_back(message);
     index++;
+  }
+  return RESULT_OK;
+}
+
+/** the name of the field attribute defining the target message filled by the field. */
+static const char* FILLS_ATTRIBUTE = "fills";
+
+result_t Message::createFillLinks(const DataField* data, vector<FillLink>* links, string* errorDescription) {
+  vector<const SingleDataField*> fields;
+  const auto set = dynamic_cast<const DataFieldSet*>(data);
+  if (set) {
+    for (size_t index = 0; index < set->size(); index++) {
+      fields.push_back((*set)[index]);
+    }
+  } else {
+    const auto single = dynamic_cast<const SingleDataField*>(data);
+    if (single) {
+      fields.push_back(single);
+    }
+  }
+  size_t offset = 0;
+  bool previousFullByteOffset = true, variableBefore = false;
+  int16_t previousFirstBit = -1;
+  for (const auto field : fields) {
+    const string targetName = field->getAttribute(FILLS_ATTRIBUTE);
+    if (field->getPartType() != pt_slaveData) {
+      if (!targetName.empty()) {
+        *errorDescription = "fills in master data field "+field->getName(-1);
+        return RESULT_ERR_INVALID_ARG;
+      }
+      continue;
+    }
+    bool shared = !previousFullByteOffset && !field->hasFullByteOffset(false, previousFirstBit);
+    if (shared) {
+      offset--;
+    }
+    size_t length = field->getLength(pt_slaveData, MAX_POS);
+    bool variable = length != field->getLength(pt_slaveData, 0);
+    previousFullByteOffset = field->hasFullByteOffset(true, previousFirstBit);
+    if (!targetName.empty()) {
+      if (variable || variableBefore) {
+        *errorDescription = "fills with variable length in field "+field->getName(-1);
+        return RESULT_ERR_INVALID_POS;
+      }
+      if (shared || !previousFullByteOffset || length == 0) {
+        *errorDescription = "fills with partial byte in field "+field->getName(-1);
+        return RESULT_ERR_INVALID_POS;
+      }
+      if (!links->empty() && links->back().targetName == targetName
+          && links->back().offset + links->back().length == offset) {
+        links->back().length += length;  // consecutive fields of the same target
+      } else {
+        for (const auto& link : *links) {
+          if (link.targetName == targetName) {
+            *errorDescription = "fills not consecutive in field "+field->getName(-1);
+            return RESULT_ERR_INVALID_POS;
+          }
+        }
+        links->push_back({targetName, offset, length, nullptr});
+      }
+    }
+    if (variable) {
+      variableBefore = true;
+    } else {
+      offset += length;
+    }
   }
   return RESULT_OK;
 }
@@ -2198,6 +2280,10 @@ result_t MessageMap::add(bool storeByName, Message* message, bool replace) {
     m_computedIdPositions.push_back(computed.getPos());
   }
   m_messagesByKey[key].push_back(message);
+  if (message->isCarrier()) {
+    m_fillCarriers.push_back(message);
+  }
+  m_fillGeneration++;
   return RESULT_OK;
 }
 
@@ -2257,6 +2343,8 @@ void MessageMap::remove(Message* message) {
   if (message->getPollPriority() > 0) {
     m_pollMessages.remove(message);
   }
+  m_fillCarriers.erase(std::remove(m_fillCarriers.begin(), m_fillCarriers.end(), message), m_fillCarriers.end());
+  m_fillGeneration++;
   if (needDelete) {
     delete message;
   }
@@ -3059,6 +3147,59 @@ void MessageMap::invalidateCache(Message* message) {
   }
 }
 
+result_t MessageMap::resolveFills(Message* carrier, string* errorDescription) {
+  carrier->m_fillGeneration = m_fillGeneration;
+  result_t overallResult = RESULT_OK;
+  for (auto& link : carrier->m_fillLinks) {
+    link.target = nullptr;
+    Message* target = find(carrier->getCircuit(), link.targetName, "*", false, false);
+    string error;
+    result_t result = RESULT_OK;
+    if (!target) {
+      error = "not found";
+      result = RESULT_ERR_NOTFOUND;
+    } else if (target->isCarrier()) {
+      error = "is a carrier";
+      result = RESULT_ERR_INVALID_ARG;
+    } else if (target->getCount() > 1) {
+      error = "is chained";
+      result = RESULT_ERR_INVALID_ARG;
+    } else if (target->m_data->getLength(pt_masterData, MAX_POS) != 0) {
+      error = "has master data";
+      result = RESULT_ERR_INVALID_ARG;
+    } else if (target->getDstAddress() != SYN && carrier->getDstAddress() != SYN
+        && target->getDstAddress() != carrier->getDstAddress()) {
+      error = "has another destination";
+      result = RESULT_ERR_INVALID_ADDR;
+    } else if (target->m_data->getLength(pt_slaveData, MAX_POS) != link.length
+        || target->m_data->getLength(pt_slaveData, 0) != link.length) {
+      error = "has another length";
+      result = RESULT_ERR_INVALID_POS;
+    }
+    if (result != RESULT_OK) {
+      if (!errorDescription->empty()) {
+        *errorDescription += ", ";
+      }
+      *errorDescription += carrier->getCircuit()+" "+carrier->getName()+" fills "+link.targetName+": "+error;
+      overallResult = result;
+      continue;
+    }
+    link.target = target;
+  }
+  return overallResult;
+}
+
+result_t MessageMap::resolveFills(string* errorDescription) {
+  result_t overallResult = RESULT_OK;
+  for (const auto carrier : m_fillCarriers) {
+    result_t result = resolveFills(carrier, errorDescription);
+    if (result != RESULT_OK) {
+      overallResult = result;
+    }
+  }
+  return overallResult;
+}
+
 void MessageMap::addPollMessage(bool toFront, Message* message) {
   if (message != nullptr && message->getPollPriority() > 0) {
     lock();
@@ -3082,6 +3223,8 @@ bool MessageMap::decodeCircuit(const string& circuit, OutputFormat outputFormat,
 }
 
 void MessageMap::clear() {
+  m_fillCarriers.clear();
+  m_fillGeneration++;
   m_loadedFiles.clear();
   m_loadedFileInfos.clear();
   // clear poll messages

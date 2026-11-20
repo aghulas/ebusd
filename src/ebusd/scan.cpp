@@ -282,6 +282,11 @@ result_t ScanHelper::executeInstructions(BusHandler* busHandler) {
     logError(lf_main, "error resolving conditions: %s, last error: %s", getResultCode(result),
         errorDescription.c_str());
   }
+  errorDescription.clear();
+  result_t fillsResult = m_messages->resolveFills(&errorDescription);
+  if (fillsResult != RESULT_OK) {
+    logError(lf_main, "error resolving fills: %s, %s", getResultCode(fillsResult), errorDescription.c_str());
+  }
   ostringstream log;
   executeInstructionsBusHandlerInstance = busHandler;
   result = m_messages->executeInstructions(&readMessage, &log);
@@ -293,7 +298,7 @@ result_t ScanHelper::executeInstructions(BusHandler* busHandler) {
   }
   logNotice(lf_main, "found messages: %d (%d conditional on %d conditions, %d poll, %d update)", m_messages->size(),
       m_messages->sizeConditional(), m_messages->sizeConditions(), m_messages->sizePoll(), m_messages->sizePassive());
-  return result;
+  return result == RESULT_OK ? fillsResult : result;
 }
 
 result_t ScanHelper::loadDefinitionsFromConfigPath(FileReader* reader, const string& filename,

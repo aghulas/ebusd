@@ -66,6 +66,26 @@ class SimpleCondition;
 class CombinedCondition;
 class AddAttributes;
 class MessageMap;
+class Message;
+
+
+/**
+ * A link from fields of the slave data of a carrier @a Message to the target @a Message they fill, as defined by the
+ * field attribute "fills" with the name of the target message in the same circuit.
+ */
+struct FillLink {
+  /** the name of the target @a Message. */
+  string targetName;
+
+  /** the offset of the bytes in the slave data of the carrier. */
+  size_t offset;
+
+  /** the number of bytes. */
+  size_t length;
+
+  /** the resolved target @a Message, or nullptr. */
+  Message* target;
+};
 
 
 /**
@@ -409,6 +429,27 @@ class Message : public AttributedItem {
    * false if message can be initiated by any participant.
    */
   bool isPassive() const { return m_isPassive; }
+
+  /**
+   * Create the @a FillLink instances from the field attribute "fills" of the slave data fields.
+   * @param data the @a DataField of the message.
+   * @param links the vector to add the @a FillLink instances to.
+   * @param errorDescription the string in which to store the error description in case of error.
+   * @return @a RESULT_OK on success, or an error code.
+   */
+  static result_t createFillLinks(const DataField* data, vector<FillLink>* links, string* errorDescription);
+
+  /**
+   * Return whether this message fills other messages (i.e. has at least one field with attribute "fills").
+   * @return true if this message is a carrier for other messages.
+   */
+  bool isCarrier() const { return !m_fillLinks.empty(); }
+
+  /**
+   * Return the @a FillLink instances of this carrier message.
+   * @return the @a FillLink instances.
+   */
+  const vector<FillLink>& getFillLinks() const { return m_fillLinks; }
 
   /**
    * Get the source address.
@@ -821,6 +862,12 @@ class Message : public AttributedItem {
 
   /** the system time when this message was last polled for, 0 for never. */
   time_t m_lastPollTime;
+
+  /** the @a FillLink instances (when this is a carrier message). */
+  vector<FillLink> m_fillLinks;
+
+  /** the @a MessageMap generation for which the @a FillLink instances were resolved. */
+  size_t m_fillGeneration;
 };
 
 
@@ -1492,7 +1539,7 @@ class MessageMap : public MappedFileReader {
   explicit MessageMap(bool addAll = false, const string& preferLanguage = "", bool deleteData = true)
   : MappedFileReader::MappedFileReader(true, preferLanguage), m_resolver(nullptr),
     m_addAll(addAll), m_additionalScanMessages(false), m_maxIdLength(0), m_maxBroadcastIdLength(0),
-    m_messageCount(0), m_conditionalMessageCount(0), m_passiveMessageCount(0) {
+    m_messageCount(0), m_conditionalMessageCount(0), m_passiveMessageCount(0), m_fillGeneration(1) {
     m_scanMessage = Message::createScanMessage(false, deleteData);
     m_broadcastScanMessage = Message::createScanMessage(true, false);
   }
@@ -1754,6 +1801,24 @@ class MessageMap : public MappedFileReader {
   void invalidateCache(Message* message);
 
   /**
+   * Resolve the target messages of all carrier messages.
+   * @param errorDescription the string in which to store the error description in case of error.
+   * @return @a RESULT_OK on success, or an error code.
+   */
+  result_t resolveFills(string* errorDescription);
+
+ private:
+  /**
+   * Resolve the target messages of a carrier message.
+   * @param carrier the carrier @a Message.
+   * @param errorDescription the string in which to append the error description in case of error.
+   * @return @a RESULT_OK on success, or an error code.
+   */
+  result_t resolveFills(Message* carrier, string* errorDescription);
+
+ public:
+
+  /**
    * Add a @a Message to the list of instances to poll.
    * @param toFront whether to add the @a Message to the very front of the poll queue.
    * @param message the @a Message to poll.
@@ -1884,6 +1949,12 @@ class MessageMap : public MappedFileReader {
 
   /** the number of distinct passive @a Message instances stored in @a m_messagesByKey. */
   size_t m_passiveMessageCount;
+
+  /** the carrier @a Message instances. */
+  vector<Message*> m_fillCarriers;
+
+  /** the generation of the stored messages for resolving @a FillLink instances (incremented on each change). */
+  size_t m_fillGeneration;
 
   /** the known @a Message instances by lowercase circuit (optional), name, and type. */
   map<string, vector<Message*> > m_messagesByName;
