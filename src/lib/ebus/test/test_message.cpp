@@ -234,6 +234,32 @@ void testComputedByte(MessageMap* messages) {
     check(result == RESULT_OK && master == expect,
         string("prepare ") + send.name + " " + send.input + ": " + master.getStr() + " expected " + expect.getStr());
   }
+  // aliases: "[WCRC]" at the start of the comment and attribute "wcrc" behave like "crc8;poly=5c"
+  {
+    string err2;
+    const string aliasHeader =
+        "type,circuit,level,name,comment,qq,zz,pbsb,id,wcrc,*name,part,type,divisor/values,unit,comment\n";
+    check(loadCsv(messages, aliasHeader +
+        "w,ka,,ByComment,[WCRC] setting,,15,5023,4c2500,,,,UIN,,,\n"
+        "w,ka,,ByAttribute,,,15,5023,ab2600,1,,,UIN,,,\n"
+        "w,ka,,NotAtStart,setting [WCRC],,15,5023,4c2700,,,,UIN,,,\n", &err2) == RESULT_OK, "load aliases " + err2);
+    const char* names[][2] = {{"ByComment", "1"}, {"ByAttribute", "1"}, {"NotAtStart", "0"}};
+    for (const auto& name : names) {
+      Message* message = messages->find("ka", name[0], "", true);
+      check(message != nullptr && message->getComputedByte().isEnabled() == (name[1][0] == '1'),
+          string("alias ") + name[0]);
+    }
+    Message* message = messages->find("ka", "ByComment", "", true);
+    if (message) {
+      istringstream input("2");
+      MasterSymbolString master;
+      check(message->prepareMaster(0, 0xff, SYN, UI_FIELD_SEPARATOR, &input, &master) == RESULT_OK
+          && master.getStr() == "ff15502305cc25000200", "alias prepare " + master.getStr());
+    }
+    // the alias is checked like the attribute, e.g. not in the varying part of chained IDs
+    check(loadCsv(messages, aliasHeader + "r,ka,,Chained,[WCRC],,15,5022,1b01:2;1c01:2,,a,,UIN,,,,b,,UIN,,,\n", &err2)
+        != RESULT_OK, "reject alias in the varying part of chained IDs: " + err2);
+  }
   // chained message with the computed byte in the common prefix of its IDs
   {
     string err2;

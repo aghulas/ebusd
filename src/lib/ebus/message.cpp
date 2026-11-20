@@ -98,6 +98,15 @@ static unsigned int g_lastPollOrder = 0;
 /** the name of the message attribute defining a @a ComputedByte. */
 static const char* COMPUTED_BYTE_ATTRIBUTE = "crc";
 
+/** the name of the message attribute that is an alias of the attribute "crc" with value @a WCRC_DEFINITION. */
+static const char* WCRC_ATTRIBUTE = "wcrc";
+
+/** the marker at the start of the comment that is an alias of the attribute "crc" with value @a WCRC_DEFINITION. */
+static const char* WCRC_MARKER = "[WCRC]";
+
+/** the definition of the computed byte used by Weishaupt and Wolf, aliased by "[WCRC]" and attribute "wcrc". */
+static const char* WCRC_DEFINITION = "crc8;poly=5c";
+
 
 result_t ComputedByte::parse(const string& str, string* errorDescription) {
   m_enabled = false;
@@ -605,6 +614,13 @@ result_t Message::create(const string& filename, const DataFieldTemplates* templ
     maxLength = MAX_POS;
   }
   str = getDefault(pluck(COMPUTED_BYTE_ATTRIBUTE, row), defaults, COMPUTED_BYTE_ATTRIBUTE);
+  if (str.empty()) {
+    // aliases kept for definitions made for the first version of this feature
+    string alias = getDefault(pluck(WCRC_ATTRIBUTE, row), defaults, WCRC_ATTRIBUTE);
+    if (alias == "1" || comment.compare(0, strlen(WCRC_MARKER), WCRC_MARKER) == 0) {
+      str = WCRC_DEFINITION;
+    }
+  }
   if (!str.empty()) {
     ComputedByte computed;
     result = computed.parse(str, errorDescription);
