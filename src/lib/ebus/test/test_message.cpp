@@ -251,6 +251,18 @@ void testFills(MessageMap* messages) {
         "telegram to another destination fills only the target without destination");
   }
 
+  // a carrier that cannot be sent on its own is not used for polling
+  const char* unsendable[] = {
+    "r,fs1,,C,,,,5022,d91b011c011d01,day,,UIN,,,,HolidayStartDay\n",  // no destination
+    "r,fs1,,C,,,35,5022,d91b011c011d01,x,m,UCH,,,,,day,s,UIN,,,,HolidayStartDay\n",  // needs input
+  };
+  for (const auto def : unsendable) {
+    err.clear();
+    result = loadFillsCsv(messages, header + def + targets, &err);
+    Message* target = messages->find("fs1", "HolidayStartDay", "", false);
+    checkFills(result == RESULT_OK && target && messages->findFillCarrier(target) == nullptr,
+        string("not polled through ") + def + err);
+  }
   // removing a target leaves no dangling link: invalidating after a write and distributing use the current messages
   err.clear();
   result = loadFillsCsv(messages, header + carrier + targets +

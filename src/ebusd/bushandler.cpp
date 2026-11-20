@@ -365,6 +365,14 @@ void BusHandler::notifyProtocolStatus(ProtocolState state, result_t result) {
           Message* carrier = m_messages->findFillCarrier(message);
           auto request = new PollRequest(carrier ? carrier : message);
           result_t ret = request->prepare(m_protocol->getOwnMasterAddress());
+          if (ret != RESULT_OK && carrier) {
+            logError(lf_bus, "prepare poll carrier %s %s: %s", carrier->getCircuit().c_str(),
+                carrier->getName().c_str(), getResultCode(ret));
+            carrier->setFillFailed(true);  // poll the filled messages directly from now on
+            delete request;
+            request = new PollRequest(message);
+            ret = request->prepare(m_protocol->getOwnMasterAddress());
+          }
           if (ret != RESULT_OK) {
             logError(lf_bus, "prepare poll message: %s", getResultCode(ret));
             delete request;
