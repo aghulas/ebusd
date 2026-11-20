@@ -69,6 +69,118 @@ class MessageMap;
 
 
 /**
+ * A byte of the master data that is computed from other bytes of the master data when sending (e.g. a checksum),
+ * and checked against them when receiving. Defined by the message attribute "crc" with the format
+ * "ALGORITHM[;KEY=VALUE]*" with ALGORITHM being "crc8" (CRC-8 calculated like the eBUS frame CRC, i.e. with the
+ * table of the polynomial applied as crc=table[crc]^byte) and the keys:
+ * <ul>
+ * <li>poly: the polynomial in hex (default 9b),</li>
+ * <li>init: the initial value in hex (default 00),</li>
+ * <li>pos: the position of the computed byte in the master data (default 0, i.e. the first byte after NN),</li>
+ * <li>from: the position of the first covered byte in the master data (default pos+1),</li>
+ * <li>to: the position after the last covered byte in the master data, or "*" for the end (default),</li>
+ * <li>check: "strict" for only matching received data with the correct byte (default), or "ignore" for not
+ * checking it.</li>
+ * </ul>
+ */
+class ComputedByte {
+ public:
+  /**
+   * Construct a new disabled instance.
+   */
+  ComputedByte()
+  : m_enabled(false), m_poly(0x9b), m_init(0), m_pos(0), m_from(1), m_to(0), m_strict(true) {}
+
+  /**
+   * Parse the definition.
+   * @param str the definition string (see class description).
+   * @param errorDescription the string in which to store the error description in case of error.
+   * @return @a RESULT_OK on success, or an error code.
+   */
+  result_t parse(const string& str, string* errorDescription);
+
+  /**
+   * Create the instance from the message attributes.
+   * @param attributes the message attributes.
+   * @return the (possibly disabled) instance.
+   */
+  static ComputedByte fromAttributes(const map<string, string>& attributes);
+
+  /**
+   * @return whether the computed byte is enabled.
+   */
+  bool isEnabled() const { return m_enabled; }
+
+  /**
+   * @return the position of the computed byte in the master data.
+   */
+  size_t getPos() const { return m_pos; }
+
+  /**
+   * @return whether received data is only matched with the correct byte.
+   */
+  bool isStrict() const { return m_strict; }
+
+  /**
+   * Return whether the computed byte is within the specified ID length.
+   * @param idLength the length of the ID bytes (without PB/SB).
+   * @return true if the computed byte is within the ID.
+   */
+  bool isInId(size_t idLength) const { return m_enabled && m_pos < idLength; }
+
+  /**
+   * Return the minimum length of the master data needed for computing the byte.
+   * @return the minimum length of the master data.
+   */
+  size_t getMinLength() const;
+
+  /**
+   * Compute the byte from the master data.
+   * @param master the @a MasterSymbolString to compute the byte from.
+   * @param result the variable in which to store the computed byte.
+   * @return @a RESULT_OK on success, or an error code if the data is too short.
+   */
+  result_t compute(const MasterSymbolString& master, symbol_t* result) const;
+
+  /**
+   * Check the computed byte in the master data.
+   * @param master the @a MasterSymbolString to check.
+   * @return true if the byte is not checked or matches.
+   */
+  bool check(const MasterSymbolString& master) const;
+
+  /**
+   * Set the computed byte in the master data.
+   * @param master the @a MasterSymbolString to update.
+   * @return @a RESULT_OK on success, or an error code.
+   */
+  result_t apply(MasterSymbolString* master) const;
+
+ private:
+  /** whether the computed byte is enabled. */
+  bool m_enabled;
+
+  /** the CRC polynomial. */
+  symbol_t m_poly;
+
+  /** the CRC initial value. */
+  symbol_t m_init;
+
+  /** the position of the computed byte in the master data. */
+  size_t m_pos;
+
+  /** the position of the first covered byte in the master data. */
+  size_t m_from;
+
+  /** the position after the last covered byte in the master data, or 0 for the end. */
+  size_t m_to;
+
+  /** whether received data is only matched with the correct byte. */
+  bool m_strict;
+};
+
+
+/**
  * Defines parameters of a message sent or received on the bus.
  */
 class Message : public AttributedItem {

@@ -80,6 +80,68 @@ class TestResolver : public Resolver {
 
 }  // namespace ebusd
 
+
+void check(bool ok, const string& what) {
+  if (ok) {
+    cout << "  " << what << " OK" << endl;
+  } else {
+    cout << "  " << what << " FAILED" << endl;
+    error = true;
+  }
+}
+
+/** Test the computed byte of the master data (attribute "crc"). */
+void testComputedByte() {
+  cout << "computed byte:" << endl;
+  // parser
+  const char* goodDefs[] = {"crc8", "crc8;poly=5c", "CRC8; poly=5c; init=00; pos=0; from=1; to=*; check=strict",
+    "crc8;pos=4;from=0;to=4", "crc8;check=ignore"};
+  for (const auto def : goodDefs) {
+    ComputedByte computed;
+    string err;
+    check(computed.parse(def, &err) == RESULT_OK && computed.isEnabled(), string("parse \"") + def + "\"");
+  }
+  const char* badDefs[] = {"", "crc16", "crc8;poly=xyz", "crc8;poly", "crc8;foo=1", "crc8;check=lax",
+    "crc8;pos=1;from=0", "crc8;from=3;to=2", "crc8;pos=1;from=0;to=4"};
+  for (const auto def : badDefs) {
+    ComputedByte computed;
+    string err;
+    check(computed.parse(def, &err) != RESULT_OK && !computed.isEnabled(), string("reject \"") + def + "\"");
+  }
+
+  // algorithm: CRC-8 with polynomial 0x5c over known telegrams, the byte placeholder being replaced
+  const char* vectors[][2] = {
+    {"0015502203002500", "4c"},  // register read
+    {"00155023050025000200", "cc"},  // register write
+    {"0035502207001b011c011d01", "d9"},  // read of three registers
+    {"0008500005000601f2d8", "e8"},  // memory read
+    {"00085023090042010400" "5d010000", "d8"},  // Wolf HG07 write (john30/ebusd#167)
+  };
+  ComputedByte wh;
+  string err;
+  wh.parse("crc8;poly=5c", &err);
+  for (const auto vec : vectors) {
+    MasterSymbolString master;
+    master.parseHex(vec[0]);
+    symbol_t value = 0;
+    MasterSymbolString expect;
+    expect.parseHex(vec[1]);
+    check(wh.compute(master, &value) == RESULT_OK && value == expect[0], string("compute ") + vec[0]);
+  }
+  // default polynomial: the eBUS frame CRC (SymbolString::calcCrc), here over a whole telegram without escapes
+  ComputedByte frame;
+  frame.parse("crc8;pos=8;from=0;to=8", &err);
+  MasterSymbolString frameData, frameTelegram;
+  frameData.parseHex("0000000009""3108b509030d2800""00");
+  frameTelegram.parseHex("3108b509030d2800");
+  symbol_t frameValue = 0;
+  check(frame.compute(frameData, &frameValue) == RESULT_OK && frameValue == frameTelegram.calcCrc(),
+      "compute with eBUS polynomial");
+  MasterSymbolString shortData;
+  shortData.parseHex("0000000003""3108b5");
+  check(frame.compute(shortData, &frameValue) == RESULT_ERR_INVALID_POS, "compute beyond data rejected");
+}
+
 int main() {
   // message:   [type],[circuit],name,[comment],[QQ[;QQ]*],[ZZ],[PBSB],[ID],fields...
   // field:     name,part,type[:len][,[divisor|values][,[unit][,[comment]]]]
@@ -510,6 +572,8 @@ int main() {
       verify(failedPrepareMatch, "prepare", inputStr, match, mstrs[0]->getStr(), writeMstr.getStr());
     }
   }
+
+  testComputedByte();
 
   delete templates;
   delete messages;
