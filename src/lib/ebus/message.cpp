@@ -2919,23 +2919,7 @@ Message* MessageMap::find(const MasterSymbolString& master, bool anyDestination,
   if (anyDestination && master.size() >= 5 && master[4] == 0 && master[2] == 0x07 && master[3] == 0x04) {
     return m_scanMessage;
   }
-  Message* message = findByKeyOf(master, master, anyDestination, withRead, withWrite, withPassive, onlyAvailable);
-  if (message) {
-    return message;
-  }
-  // try again with the key of messages having a computed byte in the ID, i.e. with that byte cleared
-  for (const auto pos : m_computedIdPositions) {
-    if (master.getDataSize() <= pos || master.dataAt(pos) == 0) {
-      continue;
-    }
-    MasterSymbolString keyMaster(master);
-    keyMaster[5+pos] = 0;
-    message = findByKeyOf(keyMaster, master, anyDestination, withRead, withWrite, withPassive, onlyAvailable);
-    if (message) {
-      return message;
-    }
-  }
-  return nullptr;
+  return findByKeyOf(master, master, anyDestination, withRead, withWrite, withPassive, onlyAvailable);
 }
 
 Message* MessageMap::findByKeyOf(const MasterSymbolString& keyMaster, const MasterSymbolString& master,
@@ -2960,37 +2944,19 @@ Message* MessageMap::findByKeyOf(const MasterSymbolString& keyMaster, const Mast
         }
       }
     }
-    Message* message;
-    if (withPassive) {
-      message = getFirstAvailableFromIterator(m_messagesByKey.find(key), &master, onlyAvailable);
-      if (message) {
-        return message;
-      }
+    Message* message = findByKey(key, master, isWriteDest, withRead, withWrite, withPassive, onlyAvailable);
+    if (message) {
+      return message;
     }
-    if ((key & ID_SOURCE_MASK) != 0) {
-      key &= ~ID_SOURCE_MASK;
-      if (withPassive) {
-        // try again without specific source master
-        message = getFirstAvailableFromIterator(m_messagesByKey.find(key), &master, onlyAvailable);
-        if (message) {
-          return message;
-        }
+    // try again with the key of messages having a computed byte within this ID length, i.e. with that byte cleared
+    size_t keyLength = idLength == maxIdLength && keyMaster.getDataSize() < idLength ? keyMaster.getDataSize()
+        : idLength;
+    for (const auto pos : m_computedIdPositions) {
+      if (pos >= keyLength || keyMaster.dataAt(pos) == 0) {
+        continue;
       }
-    }
-    if (withRead) {
-      // try again with special value for active read
-      message = getFirstAvailableFromIterator(
-        m_messagesByKey.find(key | (isWriteDest ? ID_SOURCE_ACTIVE_READ_MASTER : ID_SOURCE_ACTIVE_READ)),
-        &master, onlyAvailable);
-      if (message) {
-        return message;
-      }
-    }
-    if (withWrite) {
-      // try again with special value for active write
-      message = getFirstAvailableFromIterator(
-        m_messagesByKey.find(key | (isWriteDest ? ID_SOURCE_ACTIVE_WRITE_MASTER : ID_SOURCE_ACTIVE_WRITE)),
-        &master, onlyAvailable);
+      uint64_t maskedKey = key ^ ((uint64_t)keyMaster.dataAt(pos) << (8 * (3 - pos % 4)));
+      message = findByKey(maskedKey, master, isWriteDest, withRead, withWrite, withPassive, onlyAvailable);
       if (message) {
         return message;
       }
@@ -3000,6 +2966,46 @@ Message* MessageMap::findByKeyOf(const MasterSymbolString& keyMaster, const Mast
     }
   }
 
+  return nullptr;
+}
+
+Message* MessageMap::findByKey(uint64_t key, const MasterSymbolString& master, bool isWriteDest, bool withRead,
+    bool withWrite, bool withPassive, bool onlyAvailable) const {
+  Message* message;
+  if (withPassive) {
+    message = getFirstAvailableFromIterator(m_messagesByKey.find(key), &master, onlyAvailable);
+    if (message) {
+      return message;
+    }
+  }
+  if ((key & ID_SOURCE_MASK) != 0) {
+    key &= ~ID_SOURCE_MASK;
+    if (withPassive) {
+      // try again without specific source master
+      message = getFirstAvailableFromIterator(m_messagesByKey.find(key), &master, onlyAvailable);
+      if (message) {
+        return message;
+      }
+    }
+  }
+  if (withRead) {
+    // try again with special value for active read
+    message = getFirstAvailableFromIterator(
+      m_messagesByKey.find(key | (isWriteDest ? ID_SOURCE_ACTIVE_READ_MASTER : ID_SOURCE_ACTIVE_READ)),
+      &master, onlyAvailable);
+    if (message) {
+      return message;
+    }
+  }
+  if (withWrite) {
+    // try again with special value for active write
+    message = getFirstAvailableFromIterator(
+      m_messagesByKey.find(key | (isWriteDest ? ID_SOURCE_ACTIVE_WRITE_MASTER : ID_SOURCE_ACTIVE_WRITE)),
+      &master, onlyAvailable);
+    if (message) {
+      return message;
+    }
+  }
   return nullptr;
 }
 

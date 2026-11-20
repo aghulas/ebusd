@@ -1730,6 +1730,20 @@ class MessageMap : public MappedFileReader {
   Message* findByKeyOf(const MasterSymbolString& keyMaster, const MasterSymbolString& master, bool anyDestination,
       bool withRead, bool withWrite, bool withPassive, bool onlyAvailable) const;
 
+  /**
+   * Find the @a Message instance for the specified key and its variants for any source and active messages.
+   * @param key the key (with the source of the master data).
+   * @param master the @a MasterSymbolString for checking the ID of the @a Message.
+   * @param isWriteDest whether the destination is a master or broadcast.
+   * @param withRead true to include read messages.
+   * @param withWrite true to include write messages.
+   * @param withPassive true to include passive messages.
+   * @param onlyAvailable true to include only available messages.
+   * @return the @a Message instance, or nullptr.
+   */
+  Message* findByKey(uint64_t key, const MasterSymbolString& master, bool isWriteDest, bool withRead,
+      bool withWrite, bool withPassive, bool onlyAvailable) const;
+
  public:
 
   /**
