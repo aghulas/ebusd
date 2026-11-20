@@ -1,3 +1,8 @@
+# next
+## Features
+* add carrier messages filling other messages from fields of their answer (field attribute "fills")
+
+
 # 26.1 (2026-02-08)
 ## Bug Fixes
 * fix potential memory leak

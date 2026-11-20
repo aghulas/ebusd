@@ -502,6 +502,35 @@ void BusHandler::notifyProtocolMessage(MessageDirection direction, const MasterS
         logNotice(lf_update, "%s %s %s %s: %s", prefix, mode, circuit.c_str(), name.c_str(), data.c_str());
       }
     }
+    if (message->isCarrier()) {
+      if (result < RESULT_OK || direction == md_answer) {
+        message->setFillFailed(result < RESULT_OK);
+      } else {
+        distributeFills(message);
+      }
+    }
+  }
+}
+
+void BusHandler::distributeFills(Message* carrier) {
+  vector<Message*> updated;
+  string errorDescription;
+  result_t result = m_messages->distribute(carrier, &updated, &errorDescription);
+  carrier->setFillFailed(result < RESULT_OK);
+  if (result != RESULT_OK && result != RESULT_EMPTY) {
+    logError(lf_update, "unable to fill from %s %s: %s %s", carrier->getCircuit().c_str(),
+        carrier->getName().c_str(), getResultCode(result), errorDescription.c_str());
+  }
+  for (const auto target : updated) {
+    ostringstream output;
+    result = target->decodeLastData(pt_any, false, nullptr, -1, OF_NONE, &output);
+    if (result < RESULT_OK) {
+      logError(lf_update, "unable to parse %s %s filled from %s: %s", target->getCircuit().c_str(),
+          target->getName().c_str(), carrier->getName().c_str(), getResultCode(result));
+    } else {
+      logNotice(lf_update, "filled %s %s from %s: %s", target->getCircuit().c_str(), target->getName().c_str(),
+          carrier->getName().c_str(), output.str().c_str());
+    }
   }
 }
 

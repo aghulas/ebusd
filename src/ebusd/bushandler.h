@@ -411,6 +411,12 @@ class BusHandler : public ProtocolListener {
   void notifyProtocolMessage(MessageDirection direction, const MasterSymbolString& master,
       const SlaveSymbolString& slave) override;
 
+  /**
+   * Fill the target messages of a carrier message from its last data and log the result.
+   * @param carrier the carrier @a Message that was just updated.
+   */
+  void distributeFills(Message* carrier);
+
  private:
   /**
    * Prepare a @a ScanRequest.

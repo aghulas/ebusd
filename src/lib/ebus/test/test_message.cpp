@@ -118,6 +118,88 @@ void testFills(MessageMap* messages) {
     }
     checkFills(result != RESULT_OK && resolveError.find(bad[1]) != string::npos, "resolve error " + resolveError);
   }
+
+  // distribution: a holiday date read with one telegram fills the three single messages
+  const string carrier =
+      "r,fs1,,HolidayStart,,,35,5022,d91b011c011d01,day,,UIN,,,,HolidayStartDay,month,,UIN,,,,HolidayStartMonth,"
+      "third,,UIN,,,,HolidayStartThird\n";
+  err.clear();
+  result_t result = loadFillsCsv(messages, header + carrier + targets, &err);  // carrier before its targets
+  checkFills(result == RESULT_OK, "load carrier " + err);
+  if (result != RESULT_OK) {
+    return;
+  }
+  Message* message = messages->find("fs1", "HolidayStart", "", false);
+  checkFills(message && message->isCarrier() && message->getFillLinks().size() == 3, "carrier links");
+  if (!message) {
+    return;
+  }
+  MasterSymbolString master;
+  SlaveSymbolString slave;
+  master.parseHex("3135502207d91b011c011d01");
+  slave.parseHex("061e000a000000");
+  checkFills(messages->find(master) == message, "find carrier");
+  message->storeLastData(master, slave);
+  vector<Message*> updated;
+  err.clear();
+  result = messages->distribute(message, &updated, &err);
+  checkFills(result == RESULT_OK && updated.size() == 3, "distribute " + err);
+  const char* expected[][3] = {
+    {"HolidayStartDay", "30", "3135502203""0d1b01"},
+    {"HolidayStartMonth", "10", "3135502203""c51c01"},
+    {"HolidayStartThird", "0", "3135502203""991d01"},
+  };
+  for (const auto& exp : expected) {
+    Message* target = messages->find("fs1", exp[0], "", false);
+    if (!target) {
+      checkFills(false, string("find ") + exp[0]);
+      continue;
+    }
+    ostringstream output;
+    result = target->decodeLastData(pt_any, false, nullptr, -1, OF_NONE, &output);
+    checkFills(result == RESULT_OK && output.str() == exp[1] && target->getLastMasterData().getStr() == exp[2]
+        && target->getLastUpdateTime() == message->getLastUpdateTime(),
+        string("filled ") + exp[0] + " = " + output.str() + " from " + target->getLastMasterData().getStr());
+    // a target is the one found for its own telegram, the carrier for the grouped one
+    checkFills(messages->find(target->getLastMasterData()) == target, string("find ") + exp[0]);
+  }
+  // a short answer fills nothing
+  SlaveSymbolString shortSlave;
+  shortSlave.parseHex("041f000b00");
+  message->storeLastData(master, shortSlave);
+  updated.clear();
+  err.clear();
+  checkFills(messages->distribute(message, &updated, &err) != RESULT_OK && updated.empty(), "short answer");
+  Message* day = messages->find("fs1", "HolidayStartDay", "", false);
+  ostringstream output;
+  day->decodeLastData(pt_any, false, nullptr, -1, OF_NONE, &output);
+  checkFills(output.str() == "30", "short answer keeps value " + output.str());
+  // a non-carrier is not distributed
+  updated.clear();
+  checkFills(messages->distribute(day, &updated, &err) == RESULT_EMPTY, "not a carrier");
+
+  // a memory carrier with a verified first byte only decodes with that byte 0
+  err.clear();
+  result = loadFillsCsv(messages, header +
+      "r,bc,,Values,,,08,5000,e80601f2d8,firstbyte,,UCH,==0,,,,a,,UIN,,,,A,b,,HEX:14,,,,\n"
+      "r,bc,,A,,,08,5000,000601f2d8,,,UIN,,,,\n", &err);
+  checkFills(result == RESULT_OK, "load memory carrier " + err);
+  message = messages->find("bc", "Values", "", false);
+  if (message) {
+    MasterSymbolString memMaster;
+    SlaveSymbolString memSlave, memSlaveBad;
+    memMaster.parseHex("3108500005e80601f2d8");
+    memSlave.parseHex("11000102030405060708090a0b0c0d0e0f10");
+    memSlaveBad.parseHex("11030102030405060708090a0b0c0d0e0f10");
+    message->storeLastData(memMaster, memSlave);
+    ostringstream out;
+    checkFills(message->decodeLastData(pt_any, false, nullptr, -1, OF_NONE, &out) >= RESULT_OK,
+        "memory carrier decodes with first byte 0");
+    message->storeLastData(memMaster, memSlaveBad);
+    ostringstream out2;
+    checkFills(message->decodeLastData(pt_any, false, nullptr, -1, OF_NONE, &out2) < RESULT_OK,
+        "memory carrier fails with first byte 3");
+  }
 }
 
 
