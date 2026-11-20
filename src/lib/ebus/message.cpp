@@ -94,6 +94,141 @@ static const char* defaultMessageFieldMap[] = {  // access level not included in
 /** the m_pollOrder of the last polled message. */
 static unsigned int g_lastPollOrder = 0;
 
+/** the name of the message attribute defining a @a ComputedByte. */
+static const char* COMPUTED_BYTE_ATTRIBUTE = "crc";
+
+
+result_t ComputedByte::parse(const string& str, string* errorDescription) {
+  m_enabled = false;
+  istringstream stream(str);
+  string token;
+  bool first = true, hasFrom = false;
+  result_t result = RESULT_OK;
+  while (getline(stream, token, VALUE_SEPARATOR)) {
+    FileReader::trim(&token);
+    if (first) {
+      first = false;
+      FileReader::tolower(&token);
+      if (token != "crc8") {
+        *errorDescription = "crc algorithm "+token;
+        return RESULT_ERR_INVALID_ARG;
+      }
+      continue;
+    }
+    size_t equalPos = token.find('=');
+    if (equalPos == string::npos) {
+      *errorDescription = "crc "+token;
+      return RESULT_ERR_INVALID_ARG;
+    }
+    string key = token.substr(0, equalPos);
+    string value = token.substr(equalPos+1);
+    FileReader::trim(&key);
+    FileReader::trim(&value);
+    FileReader::tolower(&key);
+    if (key == "poly" || key == "init") {
+      symbol_t val = (symbol_t)parseInt(value.c_str(), 16, 0, 0xff, &result);
+      if (key == "poly") {
+        m_poly = val;
+      } else {
+        m_init = val;
+      }
+    } else if (key == "pos") {
+      m_pos = parseInt(value.c_str(), 10, 0, 0xff, &result);
+    } else if (key == "from") {
+      m_from = parseInt(value.c_str(), 10, 0, 0xff, &result);
+      hasFrom = true;
+    } else if (key == "to") {
+      m_to = value == "*" ? 0 : parseInt(value.c_str(), 10, 1, 0xff, &result);
+    } else if (key == "check") {
+      FileReader::tolower(&value);
+      if (value == "strict") {
+        m_strict = true;
+      } else if (value == "ignore") {
+        m_strict = false;
+      } else {
+        result = RESULT_ERR_INVALID_ARG;
+      }
+    } else {
+      result = RESULT_ERR_INVALID_ARG;
+    }
+    if (result != RESULT_OK) {
+      *errorDescription = "crc "+token;
+      return result;
+    }
+  }
+  if (first) {
+    *errorDescription = "crc algorithm";
+    return RESULT_ERR_MISSING_ARG;
+  }
+  if (!hasFrom) {
+    m_from = m_pos+1;
+  }
+  if ((m_to != 0 && m_from >= m_to) || (m_pos >= m_from && (m_to == 0 || m_pos < m_to))) {
+    *errorDescription = "crc range "+str;
+    return RESULT_ERR_INVALID_POS;
+  }
+  m_enabled = true;
+  return RESULT_OK;
+}
+
+ComputedByte ComputedByte::fromAttributes(const map<string, string>& attributes) {
+  ComputedByte ret;
+  const auto it = attributes.find(COMPUTED_BYTE_ATTRIBUTE);
+  if (it != attributes.end() && !it->second.empty()) {
+    string error;
+    if (ret.parse(it->second, &error) != RESULT_OK) {
+      ret.m_enabled = false;  // already reported by Message::create()
+    }
+  }
+  return ret;
+}
+
+size_t ComputedByte::getMinLength() const {
+  size_t len = m_to == 0 ? m_from : m_to;
+  return len > m_pos ? len : m_pos+1;
+}
+
+result_t ComputedByte::compute(const MasterSymbolString& master, symbol_t* result) const {
+  size_t dataSize = master.getDataSize();
+  size_t to = m_to == 0 ? dataSize : m_to;
+  if (dataSize <= m_pos || dataSize < to) {
+    return RESULT_ERR_INVALID_POS;
+  }
+  symbol_t crc = m_init;
+  for (size_t pos = m_from; pos < to; pos++) {
+    for (int bit = 0; bit < 8; bit++) {
+      crc = (crc & 0x80) ? static_cast<symbol_t>((crc << 1) ^ m_poly) : static_cast<symbol_t>(crc << 1);
+    }
+    crc = static_cast<symbol_t>(crc ^ master.dataAt(pos));
+  }
+  *result = crc;
+  return RESULT_OK;
+}
+
+bool ComputedByte::check(const MasterSymbolString& master) const {
+  if (!m_enabled || !m_strict) {
+    return true;
+  }
+  symbol_t value;
+  if (compute(master, &value) != RESULT_OK) {
+    return false;
+  }
+  return master.dataAt(m_pos) == value;
+}
+
+result_t ComputedByte::apply(MasterSymbolString* master) const {
+  if (!m_enabled) {
+    return RESULT_OK;
+  }
+  symbol_t value;
+  result_t result = compute(*master, &value);
+  if (result != RESULT_OK) {
+    return result;
+  }
+  (*master)[5+m_pos] = value;
+  return RESULT_OK;
+}
+
 
 Message::Message(const string& filename, const string& circuit, const string& level, const string& name,
     bool isWrite, bool isPassive, const map<string, string>& attributes,
