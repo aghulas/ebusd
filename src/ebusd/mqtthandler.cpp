@@ -602,6 +602,9 @@ void MqttHandler::notifyMqttTopic(const string& topic, const string& data) {
                         true, true, true, 0, 0, false, &messages);
     bool onlyWithData = !data.empty();
     for (const auto& message : messages) {
+      if (message->isCarrier()) {
+        continue;  // published through the messages it fills
+      }
       if ((circuitPrefix && (
           message->getCircuit().substr(0, circuit.length()) != circuit
           || (!namePrefix && name.length() > 0 && message->getName() != name)))
@@ -798,6 +801,9 @@ void MqttHandler::run() {
         m_messages->findAll("", "", m_levels, false, true, true, true, true, true, 0, 0, false, &messages);
         bool includeActiveWrite = FileReader::matches("w", filterDirection, true, true);
         for (const auto& message : messages) {
+          if (message->isCarrier()) {
+            continue;  // published through the messages it fills
+          }
           bool checkPollAdjust = false;
           bool isWrite = message->isWrite();
           bool isPassive = message->isPassive();

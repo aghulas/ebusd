@@ -356,6 +356,9 @@ void MainLoop::run() {
       m_messages->lock();
       m_messages->findAll("", "", "*", false, true, true, true, true, true, sinkSince, now, false, &messages);
       for (const auto message : messages) {
+        if (message->isCarrier()) {
+          continue;  // published through the messages it fills
+        }
         bool changed = message->getLastChangeTime() >= sinkSince;
         for (const auto dataSink : dataSinks) {
           dataSink->notifyUpdate(message, changed);
