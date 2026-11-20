@@ -452,6 +452,18 @@ class Message : public AttributedItem {
   const vector<FillLink>& getFillLinks() const { return m_fillLinks; }
 
   /**
+   * Set whether the last read of this carrier message failed (e.g. no answer or a decoding error).
+   * @param failed true if the last read failed.
+   */
+  void setFillFailed(bool failed) { m_fillFailed = failed; }
+
+  /**
+   * Return whether the last read of this carrier message failed.
+   * @return true if the last read failed.
+   */
+  bool isFillFailed() const { return m_fillFailed; }
+
+  /**
    * Get the source address.
    * @return the source address, or @a SYN for any.
    */
@@ -868,6 +880,9 @@ class Message : public AttributedItem {
 
   /** the @a MessageMap generation for which the @a FillLink instances were resolved. */
   size_t m_fillGeneration;
+
+  /** whether the last read of this carrier message failed. */
+  bool m_fillFailed;
 };
 
 
@@ -1806,6 +1821,15 @@ class MessageMap : public MappedFileReader {
    * @return @a RESULT_OK on success, or an error code.
    */
   result_t resolveFills(string* errorDescription);
+
+  /**
+   * Fill the target messages of a carrier message from its last data.
+   * @param carrier the carrier @a Message that was just updated.
+   * @param updated the vector to add the updated target @a Message instances to.
+   * @param errorDescription the string in which to store the error description in case of error.
+   * @return @a RESULT_OK on success, @a RESULT_EMPTY if the message is not a carrier, or an error code.
+   */
+  result_t distribute(Message* carrier, vector<Message*>* updated, string* errorDescription);
 
  private:
   /**

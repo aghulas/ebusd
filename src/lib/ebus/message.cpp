@@ -284,7 +284,7 @@ Message::Message(const string& filename, const string& circuit, const string& le
       m_pollPriority(pollPriority),
       m_usedByCondition(false), m_isScanMessage(false), m_condition(condition), m_availableSinceTime(0),
       m_dataHandlerState(0), m_lastUpdateTime(0), m_lastChangeTime(0), m_pollOrder(0), m_lastPollTime(0),
-      m_fillGeneration(0) {
+      m_fillGeneration(0), m_fillFailed(false) {
   string error;
   if (createFillLinks(data, &m_fillLinks, &error) != RESULT_OK) {
     m_fillLinks.clear();  // already reported by create()
@@ -309,7 +309,7 @@ Message::Message(const string& circuit, const string& level, const string& name,
       m_pollPriority(0),
       m_usedByCondition(false), m_isScanMessage(true), m_condition(nullptr), m_availableSinceTime(0),
       m_lastUpdateTime(0), m_lastChangeTime(0), m_pollOrder(0), m_lastPollTime(0),
-      m_fillGeneration(0) {
+      m_fillGeneration(0), m_fillFailed(false) {
   time(&m_createTime);
 }
 
@@ -3145,10 +3145,22 @@ void MessageMap::invalidateCache(Message* message) {
       checkMessage->m_lastUpdateTime = 0;
     }
   }
+  if (message->isWrite()) {
+    // a write also invalidates the carriers filling the read message of the same name
+    for (const auto carrier : m_fillCarriers) {
+      for (const auto& link : carrier->m_fillLinks) {
+        if (link.target && link.target->getCircuit() == circuit && link.target->getName() == name) {
+          carrier->m_lastUpdateTime = 0;
+          break;
+        }
+      }
+    }
+  }
 }
 
 result_t MessageMap::resolveFills(Message* carrier, string* errorDescription) {
   carrier->m_fillGeneration = m_fillGeneration;
+  carrier->m_fillFailed = false;
   result_t overallResult = RESULT_OK;
   for (auto& link : carrier->m_fillLinks) {
     link.target = nullptr;
@@ -3196,6 +3208,59 @@ result_t MessageMap::resolveFills(string* errorDescription) {
     if (result != RESULT_OK) {
       overallResult = result;
     }
+  }
+  return overallResult;
+}
+
+result_t MessageMap::distribute(Message* carrier, vector<Message*>* updated, string* errorDescription) {
+  if (!carrier->isCarrier()) {
+    return RESULT_EMPTY;
+  }
+  result_t overallResult = RESULT_OK;
+  if (carrier->m_fillGeneration != m_fillGeneration) {
+    overallResult = resolveFills(carrier, errorDescription);
+  }
+  const MasterSymbolString& master = carrier->getLastMasterData();
+  const SlaveSymbolString& slave = carrier->getLastSlaveData();
+  if (master.size() < 5) {
+    return RESULT_ERR_INVALID_ARG;
+  }
+  for (const auto& link : carrier->m_fillLinks) {
+    if (!link.target) {
+      continue;
+    }
+    if (slave.getDataSize() < link.offset + link.length) {
+      *errorDescription = "short data";
+      return RESULT_ERR_INVALID_POS;
+    }
+  }
+  for (const auto& link : carrier->m_fillLinks) {
+    Message* target = link.target;
+    if (!target) {
+      continue;
+    }
+    SlaveSymbolString part;
+    part.push_back(0);  // length, set below
+    for (size_t pos = 0; pos < link.length; pos++) {
+      part.push_back(slave.dataAt(link.offset + pos));
+    }
+    part.adjustHeader();
+    istringstream input;
+    MasterSymbolString targetMaster;
+    invalidateCache(target);
+    result_t result = target->prepareMaster(0, master[0], master[1], UI_FIELD_SEPARATOR, &input, &targetMaster);
+    if (result == RESULT_OK) {
+      result = target->storeLastData(0, part);
+    }
+    if (result < RESULT_OK) {
+      if (!errorDescription->empty()) {
+        *errorDescription += ", ";
+      }
+      *errorDescription += target->getName()+": "+getResultCode(result);
+      overallResult = result;
+      continue;
+    }
+    updated->push_back(target);
   }
   return overallResult;
 }

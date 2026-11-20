@@ -5,6 +5,7 @@
 ## Features
 * add computed byte of the master data, e.g. a checksum over the ID and data (message attribute "crc")
 * accept "[WCRC]" at the start of the comment and attribute "wcrc" as aliases of "crc8;poly=5c" (Weishaupt fork)
+* add carrier messages filling other messages from fields of their answer (field attribute "fills")
 
 
 # 26.1 (2026-02-08)
