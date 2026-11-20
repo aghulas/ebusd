@@ -1,3 +1,8 @@
+# next
+## Features
+* add computed byte of the master data, e.g. a checksum over the ID and data (message attribute "crc")
+
+
 # 26.1 (2026-02-08)
 ## Bug Fixes
 * fix potential memory leak
