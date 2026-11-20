@@ -160,8 +160,9 @@ void testComputedByte(MessageMap* messages) {
       "type,circuit,level,name,comment,qq,zz,pbsb,id,crc,*name,part,type,divisor/values,unit,comment\n";
   check(loadCsv(messages, header + "r,ka,,Bad,,,15,5022,4c2500,crc8;poly=zz,,,UIN,,,\n", &err) != RESULT_OK,
       "reject bad crc attribute");
+  TestResolver checkingResolver;  // declared first to outlive the map using it
   MessageMap checkingMap(false, "", false);  // not adding all, i.e. with duplicate check
-  checkingMap.setResolver(new TestResolver());
+  checkingMap.setResolver(&checkingResolver);
   check(loadCsv(&checkingMap, header + "r,ka,,A,,,15,5022,4c2500,crc8;poly=5c,,,UIN,,,\n"
       "r,ka,,B,,,15,5022,002500,crc8;poly=5c,,,UIN,,,\n", &err) == RESULT_ERR_DUPLICATE,
       "reject duplicate differing only in the computed byte " + err);
