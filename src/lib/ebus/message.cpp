@@ -2922,7 +2922,6 @@ void MessageMap::invalidateCache(Message* message) {
 result_t MessageMap::resolveFills(Message* carrier, string* errorDescription) {
   MessageMapLock lock(this);
   carrier->m_fillGeneration = m_fillGeneration;
-  carrier->m_fillFailed = false;
   result_t overallResult = RESULT_OK;
   for (auto& link : carrier->m_fillLinks) {
     link.target = nullptr;

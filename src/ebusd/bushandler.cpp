@@ -529,7 +529,8 @@ void BusHandler::distributeFills(Message* carrier) {
   vector<Message*> updated;
   string errorDescription;
   result_t result = m_messages->distribute(carrier, &updated, &errorDescription);
-  carrier->setFillFailed(result < RESULT_OK);
+  // failed only if nothing could be filled (e.g. not if just one target is not resolved)
+  carrier->setFillFailed(result < RESULT_OK && updated.empty());
   if (result != RESULT_OK && result != RESULT_EMPTY) {
     logError(lf_update, "unable to fill from %s %s: %s %s", carrier->getCircuit().c_str(),
         carrier->getName().c_str(), getResultCode(result), errorDescription.c_str());
